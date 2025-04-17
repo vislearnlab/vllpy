@@ -1,0 +1,43 @@
+Metadata-Version: 2.4
+Name: vislearnlabpy
+Version: 0.0.1
+Summary: Visual Learning Lab utility files and pipelines
+Author-email: Tarun Sepuri <tarunsepuri@gmail.com>
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/vislearnlab/vllpy
+Project-URL: Issues, https://github.com/vislearnlab/vllpy/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pandas>=2.2.3
+Requires-Dist: tqdm>=4.67.1
+Requires-Dist: pillow>=11.0.0
+Dynamic: license-file
+
+# vllpy
+
+This is a package with common utility functions, files and pipelines for the Visual Learning Lab. Creating a conda environment is recommended but optional. This package uses python=3.12.
+
+```
+conda create -n vislearnlabpy python=3.12
+conda activate vislearnlabpy
+```
+
+Then, activate the environment and simply install vislearnlabpy via running the following pip command in your terminal. You will also have to install [PyTorch](https://pytorch.org/) and CLIP manually.
+
+```
+pip install git+https://github.com/openai/CLIP.git
+pip install --upgrade vislearnlabpy
+```
+
+To install PyTorch on the Tversky server, run:
+```
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+Here is as an example of how to generate npy embedding files from a list of images whose paths are defined in a CSV file
+```
+python embedding_generator.py --input_csv examples/input/inputs.csv --output_path examples/output --output_type npy --overwrite
+```
