@@ -112,10 +112,13 @@ class MultimodalModel(FeatureGenerator):
     def save_embedding(self, embedding, curr_id, text, save_path):
         # if curr_id represents the full path of the image, portion off only the last part
         if os.path.exists(curr_id):
-            sub_save_path = f"{text}/{Path(curr_id).stem}"
+            sub_save_path = f"{text}/{Path(curr_id).name}"
         else:
             sub_save_path = curr_id
-        embedding_output_path = Path(f"{os.getcwd()}/{save_path}/{sub_save_path}").with_suffix('.npy')
+        embedding_output_path = Path(f"{save_path}/{sub_save_path}").with_suffix('.npy')
+        # if save path is a relative path, assume that we want to save files in the current directory
+        if not save_path.startswith("/"):
+            embedding_output_path = Path(f"{os.getcwd()}/{embedding_output_path}")
         os.makedirs(embedding_output_path.parent, exist_ok=True)
         np_embedding = embedding.cpu().numpy()
         np.save(str(embedding_output_path), np_embedding)
@@ -161,7 +164,6 @@ class MultimodalModel(FeatureGenerator):
         all_text = set()
         with torch.no_grad():
             for d in tqdm(self.dataloader, desc=f"Calculating {self.name} embeddings", position=tqdm._get_free_pos()):
-                print(d)
                 # TODO: only works for single images in a row
                 row_data = []
                 for count, (image, curr_id, text) in tqdm(enumerate(zip(d['images'], d['id'], d['text'] if d['text'] else itertools.repeat(None, len(d['images'])))), total=len(d['images']), desc="Image embedding progress in current batch", position=tqdm._get_free_pos()):
@@ -187,4 +189,3 @@ class MultimodalModel(FeatureGenerator):
     def normalize_embeddings(self, embeddings):
         """Normalize embeddings to unit L2 norm"""
         return [embedding / embedding.norm(dim=-1, keepdim=True) for embedding in embeddings]
-    
