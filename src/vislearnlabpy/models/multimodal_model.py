@@ -1,5 +1,6 @@
 import itertools
 from vislearnlabpy.models.feature_generator import FeatureGenerator
+from torchvision import transforms
 import torch
 import numpy as np
 import pandas as pd
@@ -17,6 +18,9 @@ class MultimodalModel(FeatureGenerator):
 
     # Load and preprocess images
     def preprocess_image(self, image):
+        if isinstance(image, torch.Tensor):  
+            transform = transforms.ToPILImage()
+            image = transform(image) 
         return self.preprocess(image).unsqueeze(0).to(self.device)
 
     def preprocess_text(self, text):
@@ -30,6 +34,9 @@ class MultimodalModel(FeatureGenerator):
 
     def image_embeddings(self, images, normalize_embeddings=True):
         """Get image embeddings"""
+        # if a single image is passed in just calling the same function again with the image placed within a list
+        if not isinstance(images, list):
+            return self.image_embeddings([images], normalize_embeddings)[0]
         images = [self.preprocess_image(image) for image in images]
         with torch.no_grad():
             embeddings = [self.encode_image(image) for image in images]
@@ -37,6 +44,9 @@ class MultimodalModel(FeatureGenerator):
             return self.normalize_embeddings(embeddings)
         else:
             return embeddings
+    
+    def image_embeddings(self, image, normalize_embeddings=True):
+
 
     def text_embeddings(self, words, normalize_embeddings=True):
         """Get text embeddings"""
