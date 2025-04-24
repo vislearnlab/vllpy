@@ -1,3 +1,0 @@
-row_id,text,embedding_path
-acorns/acorn.png,acorn,/labs/vislearnlab/experiments/vllpy/examples/output/image_embeddings/acorns/acorn.npy
-bird.png,bird,/labs/vislearnlab/experiments/vllpy/examples/output/image_embeddings/bird.npy

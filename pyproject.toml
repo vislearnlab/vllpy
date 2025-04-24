@@ -4,14 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vislearnlabpy"
-version = "0.0.1.1"
+version = "0.0.1.2"
 authors = [
   { name="Tarun Sepuri", email="tarunsepuri@gmail.com" },
 ]
 dependencies = [
   "pandas>=2.2.3",
   "tqdm>=4.67.1",
-  "pillow>=11.0.0"
+  "pillow>=11.0.0",
+  "docarray>=0.41.0",
+  "numpy>=2.2.4"
 ]
 description = "Visual Learning Lab utility files and pipelines"
 readme = "README.md"

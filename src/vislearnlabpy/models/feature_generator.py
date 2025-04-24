@@ -4,7 +4,7 @@ import pandas as pd
 import os
 import torch
 import random
-
+from vislearnlabpy.embeddings import utils
 from tqdm import tqdm
 from torch.nn.functional import cosine_similarity
 random.seed(4)
@@ -36,7 +36,7 @@ class FeatureGenerator(ABC):
 
     def save_similarities(self, sim_df: pd.DataFrame, save_path=None):
         """Save similarity scores to CSV."""
-        self.save_df(sim_df, f'similarities-{self.name}_data.csv', save_path)
+        utils.save_df(sim_df, f'similarities-{self.name}_data.csv', save_path)
 
     @abstractmethod
     def similarities(self, stimulus1, stimulus2, dataloader_row):
@@ -78,28 +78,3 @@ class FeatureGenerator(ABC):
         inputs = self.preprocess(images=images, text=words, return_tensors="pt", padding=True)
         return self.image_word_alignment(**inputs)
     
-    def save_df(self, df, filename, save_path=None, overwrite=False):
-        """
-        Save dataframe to CSV, appending to existing file if it exists.
-        Avoids duplicate row_ids and handles new directory creation.
-        """
-        filepath = os.path.join(save_path, filename)
-        # create directory if it does not exist
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-        if not os.path.exists(filepath):
-            df.to_csv(filepath, index=False)
-            return
-        try:
-            existing_df = pd.read_csv(filepath)
-            row_ids = df['row_id'].values
-            if overwrite:
-                # Remove rows from existing data that would be overwritten by new data
-                existing_df = existing_df[~existing_df['row_id'].isin(row_ids)]
-                existing_df.to_csv(filepath, index=False)             
-            else:
-                df = df[~df['row_id'].isin(existing_df['row_id'].values)]   
-            df.to_csv(filepath, mode='a', header=False, index=False)      
-        except pd.errors.EmptyDataError:
-            # Handle case where existing file is empty
-            df.to_csv(filepath, index=False)

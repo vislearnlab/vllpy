@@ -1,3 +1,0 @@
-row_id,embedding_path
-bird,/labs/vislearnlab/experiments/vllpy/examples/output/text_embeddings/bird.npy
-acorn,/labs/vislearnlab/experiments/vllpy/examples/output/text_embeddings/acorn.npy

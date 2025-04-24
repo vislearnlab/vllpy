@@ -3,7 +3,7 @@ import pandas as pd
 import re
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-from vislearnlabpy.embeddings.embedding_utils import process_csv
+from vislearnlabpy.embeddings.utils import process_csv
 import random
 
 random.seed(2)
@@ -25,6 +25,8 @@ class StimuliDataset(Dataset):
     images = []
     image_paths = self._get_image_paths(row)
     for image_path in image_paths:
+      if not os.path.isabs(image_path):
+        image_path = os.path.join(os.getcwd(), image_path)
       if image_path is None or not os.path.exists(image_path):
         images.append(None)
       else:
