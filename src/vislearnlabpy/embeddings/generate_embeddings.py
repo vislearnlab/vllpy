@@ -109,9 +109,11 @@ class EmbeddingGenerator():
                     row_data = []
                 curr_image_embeddings = self.model.image_embeddings(d['images'], normalize_embeddings)
                 count = 0
+                curr_image_embeddings_tensor = torch.stack([e[0] for e in curr_image_embeddings])  # shape: [N, D]
+                curr_image_embeddings = curr_image_embeddings_tensor.cpu().numpy()
                 for (image, curr_id, text) in tqdm(zip(d['images'], d['id'], d['text'] if d['text'] else itertools.repeat(None, len(d['images']))), total=len(d['images']), desc="Current batch", position=tqdm._get_free_pos()):
                     if curr_id not in existing_row_ids or overwrite:
-                        curr_row_data, store = self.process_embedding_row(embedding=curr_image_embeddings[count][0].cpu().numpy(), id=curr_id, save_path=full_save_path, store=store, text=text)
+                        curr_row_data, store = self.process_embedding_row(embedding=curr_image_embeddings[count], id=curr_id, save_path=full_save_path, store=store, text=text)
                         row_data.append(curr_row_data)
                     if text is not None:
                         all_text.add(text)
