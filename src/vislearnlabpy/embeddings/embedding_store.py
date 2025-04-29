@@ -3,7 +3,7 @@ from docarray import BaseDoc, DocList
 from docarray.documents import TextDoc
 from docarray.typing import ImageUrl,  ImageNdArray, NdArray
 from vislearnlabpy.models.clip_model import CLIPGenerator
-from vislearnlabpy.embeddings.utils import cleaned_doc_path
+from vislearnlabpy.embeddings.utils import cleaned_doc_path, normalize_embeddings
 from docarray.index import InMemoryExactNNIndex
 from docarray.utils.filter import filter_docs
 from tqdm import tqdm
@@ -79,16 +79,31 @@ class EmbeddingStore():
             normed_embedding=None
         ))
     
+    def add_embeddings(self, embeddings, urls, texts):
+        temp_list = DocList[self.EmbeddingType](
+            [
+            self.EmbeddingType(
+                embedding=embedding,
+                url=url,
+                text=text,
+                normed_embedding=None,
+            )
+        for embedding, url, text in tqdm(zip(embeddings, urls, texts))
+            ]
+        )
+        self.EmbeddingList.extend(temp_list)
+    
     def search_store(self, text_query, limit=10, categories=None):
-        query = self.FeatureGenerator.text_embeddings([text_query])[0][0].cpu().numpy()
+        query = self.FeatureGenerator.text_embeddings([text_query], normalize_embeddings=True)[0][0].cpu().numpy()
         doc_index = InMemoryExactNNIndex[CLIPImageEmbedding]()
         if categories is not None:
             filter_query = {
                 'text': {'$in': categories}
             }
             filtered_docs = filter_docs(self.EmbeddingList, filter_query)
-            doc_index.index(filtered_docs)
         else:
-            doc_index.index(self.EmbeddingList)
-        retrieved_docs, scores = doc_index.find(query, search_field='embedding', limit=limit)
+            filtered_docs = self.EmbeddingList
+        filtered_docs.normed_embedding = normalize_embeddings(filtered_docs.embedding)
+        doc_index.index(filtered_docs)
+        retrieved_docs, scores = doc_index.find(query, search_field='normed_embedding', limit=limit)
         return retrieved_docs, scores

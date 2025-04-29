@@ -4,6 +4,7 @@ from IPython.display import display, HTML, clear_output
 import os
 import numpy as np
 import time
+import torch
 from tqdm import tqdm
 from pathlib import Path
 
@@ -96,15 +97,23 @@ def save_df(df, filename, save_path=None, overwrite=False):
         df.to_csv(filepath, index=False)
 
 def normalize_embeddings(embeddings):
-    """Normalize embeddings to unit L2 norm"""
-    return [embedding / embedding.norm(dim=-1, keepdim=True) for embedding in embeddings]
+    """Normalize embeddings (list of tensors or arrays) to unit L2 norm using NumPy"""
+    normed = []
+    for embedding in embeddings:
+        if isinstance(embedding, torch.Tensor):
+            embedding = embedding.cpu().numpy()
+        norm = np.linalg.norm(embedding, axis=-1, keepdims=True) + 1e-8
+        normed.append(embedding / norm)
+    return normed
 
 # z-scoring embeddings
-def zscore_embeddings(embeddings):
+def zscore_embeddings(embeddings, add_rowwise_norm=False):
     mean_embedding = embeddings.mean(axis=0)
     std_embeddings = embeddings.std(axis=0)
     normalized_embeddings = (embeddings - mean_embedding) / (std_embeddings + 1e-8)
-    normalized_embeddings = normalized_embeddings / np.linalg.norm(normalized_embeddings, axis=1)[:, np.newaxis]
+    if add_rowwise_norm:
+        row_norms = np.linalg.norm(normalized_embeddings, axis=1, keepdims=True) + 1e-8
+        normalized_embeddings = normalized_embeddings / row_norms
     return normalized_embeddings
 
 # filter embeddings based on a text-image alignment value

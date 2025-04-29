@@ -30,10 +30,6 @@ class FeatureGenerator(ABC):
         similarity_score = cosine_similarity(embeddings1, embeddings2)
         return similarity_score.item()
 
-    # Normalize each embedding to have a unit L2 norm
-    def normalize_embeddings(self, embeddings):
-        return [embedding / embedding.norm(dim=-1, keepdim=True) for embedding in embeddings]
-
     def save_similarities(self, sim_df: pd.DataFrame, save_path=None):
         """Save similarity scores to CSV."""
         utils.save_df(sim_df, f'similarities-{self.name}_data.csv', save_path)

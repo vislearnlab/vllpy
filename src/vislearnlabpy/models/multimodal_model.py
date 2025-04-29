@@ -32,20 +32,23 @@ class MultimodalModel(FeatureGenerator):
     def encode_text(self, text):
         return self.model.encode_text(text)
 
-    def image_embeddings(self, images, normalize_embeddings=True):
-        """Get image embeddings"""
-        # if a single image is passed in just calling the same function again with the image placed within a list
+    def image_embeddings(self, images, normalize_embeddings=False):
+        """Get image embeddings (batched for speed)"""
+        # Handle single image case
         if not isinstance(images, list):
             return self.image_embeddings([images], normalize_embeddings)[0]
-        images = [self.preprocess_image(image) for image in images]
+        # Preprocess all images → batch
+        preprocessed_images = [self.preprocess_image(image) for image in images]
+        preprocessed_images = [image.squeeze(0) if image.dim() == 4 else image for image in preprocessed_images]
+        # Stack into a single tensor batch (assuming tensors are returned)
+        image_batch = torch.stack(preprocessed_images).to(self.device)
         with torch.no_grad():
-            embeddings = [self.encode_image(image) for image in images]
+            embeddings = self.encode_image(image_batch)  # model handles batch
         if normalize_embeddings:
-            return utils.normalize_embeddings(embeddings)
-        else:
-            return embeddings
+            embeddings = utils.normalize_embeddings(embeddings)
+        return embeddings
 
-    def text_embeddings(self, words, normalize_embeddings=True):
+    def text_embeddings(self, words, normalize_embeddings=False):
         """Get text embeddings"""
         all_text_features = [self.preprocess_text(word) for word in words]
         with torch.no_grad():
