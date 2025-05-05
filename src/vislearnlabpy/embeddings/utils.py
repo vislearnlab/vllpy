@@ -26,7 +26,7 @@ def process_csv(input_csv):
 
 def cleaned_doc_path(doc_path):
     if not os.path.isabs(doc_path.removeprefix("file://")):
-        doc_path = str(Path(f"{os.getcwd()}/{doc_path}"))
+        doc_path = str(Path(f"{os.getcwd()}/{doc_path.removeprefix("file://")}"))
     doc_path = doc_path.removesuffix(".docs")
     if not doc_path.startswith("file://"):
         doc_path = f"file://{doc_path}"
@@ -97,13 +97,19 @@ def save_df(df, filename, save_path=None, overwrite=False):
         df.to_csv(filepath, index=False)
 
 def normalize_embeddings(embeddings):
-    """Normalize embeddings (list of tensors or arrays) to unit L2 norm using NumPy"""
+    """Normalize embeddings (list of tensors or arrays) to unit L2 norm.
+       Returns output in same format (NumPy or Tensor) as input.
+    """
     normed = []
     for embedding in embeddings:
         if isinstance(embedding, torch.Tensor):
-            embedding = embedding.cpu().numpy()
-        norm = np.linalg.norm(embedding, axis=-1, keepdims=True) + 1e-8
-        normed.append(embedding / norm)
+            norm = torch.norm(embedding, p=2, dim=-1, keepdim=True) + 1e-8
+            normed.append(embedding / norm)
+        elif isinstance(embedding, np.ndarray):
+            norm = np.linalg.norm(embedding, axis=-1, keepdims=True) + 1e-8
+            normed.append(embedding / norm)
+        else:
+            raise TypeError(f"Unsupported type: {type(embedding)}")
     return normed
 
 # z-scoring embeddings

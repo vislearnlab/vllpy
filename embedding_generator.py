@@ -30,7 +30,7 @@ def main():
     if args.input_csv is None and args.input_dir is None:
         args.input_dir = "examples/input"
     embeddingGenerator = EmbeddingGenerator(device=input_device, output_type=args.output_type)
-    embeddingGenerator.generate_image_embeddings(args.output_path, args.overwrite, args.normalize, args.input_csv, args.input_dir,
+    embeddingGenerator.generate_image_embeddings(args.output_path, args.overwrite, args.input_csv, args.input_dir,
                                                  args.batch_size)
     
 if __name__ == "__main__":

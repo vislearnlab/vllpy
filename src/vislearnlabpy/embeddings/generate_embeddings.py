@@ -11,8 +11,6 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 
-torch.set_num_threads(32)
-
 class EmbeddingGenerator():
     def __init__(self, device=None, model_type="clip", model=None, output_type="csv", normalize_embeddings=False):
         if device is None:
