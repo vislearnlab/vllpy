@@ -7,7 +7,7 @@ def main():
     parser.add_argument("--input_dir", type=str, help="Input directory with images")
     parser.add_argument("--input_csv", type=str, required=False, help="CSV with more detailed information about embeddings")
     parser.add_argument("--output_path", type=str, default="examples/output", help="Output embeddings path")
-    parser.add_argument("--output_type", type=str, default="csv", help="Embedding format (npy or csv)")
+    parser.add_argument("--output_type", type=str, default="csv", help="Embedding format (npy, doc or csv)")
     parser.add_argument("--device", type=str, required=False, help="Device to run embedding generation on")
     parser.add_argument("--batch_size", type=int, default=1000, help="Batch size to save embeddings")
     parser.add_argument(
@@ -19,7 +19,7 @@ def main():
     parser.add_argument(
         "--normalize",
         action='store_true',
-        default=True,
+        default=False,
         help="Whether to normalize embeddings before saving them"
     )
     args = parser.parse_args()

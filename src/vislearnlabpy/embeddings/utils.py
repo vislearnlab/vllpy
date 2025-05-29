@@ -9,10 +9,11 @@ from tqdm import tqdm
 from pathlib import Path
 
 def rename_csv_column(file, cols, new_name):
-        for col in cols:
-            if col in file.columns:
-                file = file.rename(columns={col: new_name})
-                return file # Rename only the first match
+    for col in cols:
+        if col in file.columns:
+            file = file.rename(columns={col: new_name})
+            return file # Rename only the first match
+    return file
 
 def process_csv(input_csv):
     images_df = pd.read_csv(input_csv)
@@ -23,6 +24,14 @@ def process_csv(input_csv):
     if 'image1' not in images_df.columns:
         images_df = rename_csv_column(images_df, image_cols, 'image1')
     return images_df
+
+def indexed_embeddings(embedding):
+    curr_data = {}
+    curr_embeddings = embedding.tolist() if isinstance(embedding, torch.Tensor) else embedding
+    # new row with a separate column for each number in the 512 dimensions and one for the image_path as the row_id
+    for i, value in enumerate(curr_embeddings):
+        curr_data[f"{i}"] = value.item() if isinstance(value, torch.Tensor) else value
+    return curr_data
 
 def cleaned_doc_path(doc_path):
     if not os.path.isabs(doc_path.removeprefix("file://")):

@@ -3,9 +3,11 @@ from docarray import BaseDoc, DocList
 from docarray.documents import TextDoc
 from docarray.typing import ImageUrl,  ImageNdArray, NdArray
 from vislearnlabpy.models.clip_model import CLIPGenerator
-from vislearnlabpy.embeddings.utils import cleaned_doc_path, normalize_embeddings
+from vislearnlabpy.embeddings.utils import cleaned_doc_path, normalize_embeddings, indexed_embeddings
+from vislearnlabpy.embeddings.similarity_generator import SimilarityGenerator
 from docarray.index import InMemoryExactNNIndex
 from docarray.utils.filter import filter_docs
+from itertools import zip_longest
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
@@ -60,6 +62,13 @@ class EmbeddingStore():
                 print(f"Failed to load embedding for {row['row_id']}: {e}")
         return EmbeddingStore(embedding_doc, CLIPGenerator())
     
+    def to_base_csv(self, csv_output_path):
+        row_data = [
+        {"row_id": url, **indexed_embeddings(embedding)}
+        for url, embedding in zip(self.EmbeddingList.url, self.EmbeddingList.embedding)
+        ]
+        pd.DataFrame(row_data).to_csv(csv_output_path, index=False)
+    
     def to_doc(self, doc_output_path):
         self.output_path = cleaned_doc_path(doc_output_path)
         self.EmbeddingList.push(self.output_path)
@@ -80,15 +89,18 @@ class EmbeddingStore():
         ))
     
     def add_embeddings(self, embeddings, urls, texts):
+        seen_ids = set()  # To track unique ids (either url or text)
         temp_list = DocList[self.EmbeddingType](
             [
-            self.EmbeddingType(
-                embedding=embedding,
-                url=url,
-                text=text,
-                normed_embedding=None,
-            )
-        for embedding, url, text in tqdm(zip(embeddings, urls, texts))
+                self.EmbeddingType(
+                    embedding=embedding,
+                    url=url if isinstance(url, str) else None,
+                    text=text,
+                    normed_embedding=None,
+                )
+                for embedding, url, text in tqdm(zip_longest(embeddings, urls, texts, fillvalue=None))
+                # for url to be unique id when saving embeddings it needs to be a string
+                if (url if isinstance(url, str) else text) not in seen_ids and not seen_ids.add(url if isinstance(url, str) else text)
             ]
         )
         self.EmbeddingList.extend(temp_list)
@@ -105,5 +117,17 @@ class EmbeddingStore():
             filtered_docs = self.EmbeddingList
         filtered_docs.normed_embedding = normalize_embeddings(filtered_docs.embedding)
         doc_index.index(filtered_docs)
+        # TODO: Use find_batched
         retrieved_docs, scores = doc_index.find(query, search_field='normed_embedding', limit=limit)
         return retrieved_docs, scores
+
+    def retrieve_similarities(self, sim_type="cosine", output_path=None, text_pairs=None):
+        sim_generator = SimilarityGenerator(similarity_type=sim_type, model=self.FeatureGenerator.model)
+        if text_pairs is None:
+            # again assuming url as id, followed by text. Wondering now if we do need an explicit id column.
+            texts = self.EmbeddingList.text
+            urls = self.EmbeddingList.url
+            keys = urls or texts or None
+            return(sim_generator.all_sims(self.EmbeddingList.embedding, keys, output_path))
+        else:
+            return(sim_generator.specific_sims(self.EmbeddingList, text_pairs, output_path))

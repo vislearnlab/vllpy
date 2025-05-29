@@ -9,6 +9,8 @@ src/vislearnlabpy.egg-info/requires.txt
 src/vislearnlabpy.egg-info/top_level.txt
 src/vislearnlabpy/embeddings/embedding_store.py
 src/vislearnlabpy/embeddings/generate_embeddings.py
+src/vislearnlabpy/embeddings/similarity_generator.py
+src/vislearnlabpy/embeddings/similarity_utils.py
 src/vislearnlabpy/embeddings/stimuli_loader.py
 src/vislearnlabpy/embeddings/utils.py
 src/vislearnlabpy/models/clip_model.py

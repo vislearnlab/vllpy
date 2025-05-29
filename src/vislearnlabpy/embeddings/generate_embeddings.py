@@ -1,7 +1,7 @@
 from typing import Optional
 from vislearnlabpy.models.clip_model import CLIPGenerator
 from vislearnlabpy.embeddings.stimuli_loader import StimuliLoader
-from vislearnlabpy.embeddings.utils import save_df
+from vislearnlabpy.embeddings.utils import save_df, indexed_embeddings
 from vislearnlabpy.embeddings.embedding_store import CLIPImageEmbedding, CLIPTextEmbedding, EmbeddingStore
 import torch
 import os
@@ -46,10 +46,8 @@ class EmbeddingGenerator():
         if text is not None:
             curr_row_data['text'] = text
         if self.output_type == "csv":
-            curr_embeddings = embedding.tolist() if isinstance(embedding, torch.Tensor) else embedding
-            # new row with a separate column for each number in the 512 dimensions and one for the image_path as the row_id
-            for i, value in enumerate(curr_embeddings):
-                curr_row_data[f"{i}"] = value.item() if isinstance(value, torch.Tensor) else value
+            embedding_data = indexed_embeddings(embedding)
+            curr_row_data = curr_row_data | embedding_data
         elif self.output_type == "npy":
             # save embedding as npy in output save directory
             curr_row_data["embedding_path"] = self.save_embedding(embedding, id, save_path)
@@ -72,7 +70,7 @@ class EmbeddingGenerator():
         return existing_row_ids
     
     def save_embedding_paths(self, row_data, store, filepath, full_save_path, overwrite):
-        if self.output_type != "doc":
+        if self.output_type != "doc" and len(row_data) > 0:
             save_df(pd.DataFrame(row_data), Path(filepath).name, full_save_path, overwrite=overwrite)
         else:
             store.to_doc(filepath.removesuffix(".csv"))
@@ -84,16 +82,15 @@ class EmbeddingGenerator():
         with torch.no_grad():
             row_data = []
             # TODO: add batching, maybe just switch to dataloader
-            for text in tqdm(texts, desc="Calculating text embeddings"):
+            for text in tqdm(texts, desc="Calculating text embeddings", position=tqdm._get_free_pos()):
                 if text not in existing_row_ids or overwrite:
                     curr_text_embeddings = self.model.text_embeddings([text], self.normalize_embeddings)[0][0].cpu().numpy()
-                    if self.output_type == "store":
+                    if self.output_type == "doc":
                         store.add_embedding(curr_text_embeddings, url=None, text=text)
                     else:
                         curr_row_data = self.process_embedding_row(curr_text_embeddings, id=text, save_path=full_save_path)    
-                    row_data.append(curr_row_data)
-        if len(row_data) > 0:
-            self.save_embedding_paths(row_data, store, filepath, full_save_path, overwrite)
+                        row_data.append(curr_row_data)
+        self.save_embedding_paths(row_data, store, filepath, full_save_path, overwrite)
         
     def save_image_embeddings(self, save_path=None, overwrite=False, save_every_batch=False):
         store = EmbeddingStore(EmbeddingType=CLIPImageEmbedding)
@@ -108,6 +105,8 @@ class EmbeddingGenerator():
                 curr_image_embeddings = self.model.image_embeddings(d['images'], self.normalize_embeddings)
                 count = 0
                 curr_image_embeddings = curr_image_embeddings.cpu().numpy()
+                if d['text'] is not None:
+                    all_text.update(item for item in d['text'] if item is not None)
                 if self.output_type == "doc":
                     store.add_embeddings(curr_image_embeddings, d['id'], d['text'] if d['text'] else itertools.repeat(None, len(d['id'])))
                 else:
@@ -115,8 +114,6 @@ class EmbeddingGenerator():
                         if curr_id not in existing_row_ids or overwrite:
                             curr_row_data = self.process_embedding_row(embedding=curr_image_embeddings[count], id=curr_id, save_path=full_save_path, text=text)
                             row_data.append(curr_row_data)
-                        if text is not None:
-                            all_text.add(text)
                         count = count + 1
                 if save_every_batch:
                     self.save_embedding_paths(row_data, store, filepath, full_save_path, overwrite)
@@ -125,7 +122,8 @@ class EmbeddingGenerator():
         self.save_text_embeddings(all_text, save_path, overwrite)
     
     def generate_image_embeddings(self, output_path=None, overwrite=False, 
-                                  input_csv=None, input_dir=None, batch_size=1, save_every_batch=False):
+                                  input_csv=None, input_dir=None, batch_size=1, save_every_batch=False, 
+                                  id_column="image1"):
         if input_csv is None:
             if input_dir is None:
                 raise Exception("Either input CSV or input image directory needs to be provided")
@@ -140,7 +138,7 @@ class EmbeddingGenerator():
                 dataset_file=input_csv,
                 batch_size=batch_size,
                 stimuli_type="images",
-                id_column="image1"
+                id_column=id_column
             ).dataloader()
         self.model = CLIPGenerator(device=self.device, dataloader=images_dataloader)
         self.save_image_embeddings(save_path=output_path,overwrite=overwrite, save_every_batch=save_every_batch)
