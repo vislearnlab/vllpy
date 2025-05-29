@@ -108,9 +108,9 @@ class EmbeddingGenerator():
                 if d['text'] is not None:
                     all_text.update(item for item in d['text'] if item is not None)
                 if self.output_type == "doc":
-                    store.add_embeddings(curr_image_embeddings, d['id'], d['text'] if d['text'] else itertools.repeat(None, len(d['id'])))
+                    store.add_embeddings(curr_image_embeddings, d['item_id'], d['text'] if d['text'] else itertools.repeat(None, len(d['item_id'])))
                 else:
-                    for (curr_id, text) in tqdm(zip(d['id'], d['text'] if d['text'] else itertools.repeat(None, len(d['images']))), total=len(d['images']), desc="Current batch", position=tqdm._get_free_pos()):
+                    for (curr_id, text) in tqdm(zip(d['item_id'], d['text'] if d['text'] else itertools.repeat(None, len(d['images']))), total=len(d['images']), desc="Current batch", position=tqdm._get_free_pos()):
                         if curr_id not in existing_row_ids or overwrite:
                             curr_row_data = self.process_embedding_row(embedding=curr_image_embeddings[count], id=curr_id, save_path=full_save_path, text=text)
                             row_data.append(curr_row_data)

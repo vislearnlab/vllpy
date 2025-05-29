@@ -174,7 +174,6 @@ def text_image_sims_from_stores(
     text_pairs: Optional[List[Tuple[str, str]]] = None,
     similarity_type: str = "cosine"
 ):   
-    from vislearnlabpy.embeddings.embedding_store import EmbeddingStore
     image_df = image_embedding_store.retrieve_similarities(similarity_type, output_csv, text_pairs)
     text_df = text_embedding_store.retrieve_similarities(similarity_type, output_csv, text_pairs)
     model_type = image_embedding_store.FeatureGenerator.model

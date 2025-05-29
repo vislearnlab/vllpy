@@ -10,8 +10,9 @@ class SimilarityGenerator():
 
     def _save_csv(self, similarities, output_csv):
         similarities_df = pd.DataFrame(similarities)
-        os.makedirs(os.path.dirname(output_csv), exist_ok=True)
         if output_csv is not None:
+            output_csv_path = Path(output_csv)
+            output_csv_path.parent.mkdir(parents=True, exist_ok=True)
             similarities_df.to_csv(output_csv, index=False)
         return similarities_df
     
@@ -42,12 +43,16 @@ class SimilarityGenerator():
         df = embeddings.to_dataframe()
         # Process all combinations of embeddings and texts
         similarities = []
-        existing_texts = df["text"].values
+        if "url" in df and pd.notna(df["url"].iloc[0]):
+            key = "url"
+        else:
+            key = "text"
+        existing_texts = df[key].values
         for (text1, text2) in text_pairs:
             if text1 in existing_texts and text2 in existing_texts:
                 # Get text embeddings if available
-                text1_embedding = df[df["text"] == text1]["embedding"].iloc[0]
-                text2_embedding = df[df["text"] == text2]["embedding"].iloc[0]
+                text1_embedding = df[df[key] == text1]["embedding"].iloc[0]
+                text2_embedding = df[df[key] == text2]["embedding"].iloc[0]
                 entry = {}
                 if self.similarity_type == "cosine":
                     entry[f"{self.similarity_type}_similarity"] = cosine_sim(text1_embedding, text2_embedding)
