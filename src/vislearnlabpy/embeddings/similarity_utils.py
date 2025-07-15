@@ -6,6 +6,7 @@ import numpy as np
 import scipy
 from scipy.spatial.distance import pdist, squareform
 from scipy.stats import rankdata
+from scipy.special import softmax
 import pandas as pd
 from pathlib import Path
 from typing import Optional, List, Tuple
@@ -183,3 +184,28 @@ def text_image_sims_from_stores(
     text_df = text_df.rename(columns={f'{similarity_type}_similarity': 'text_similarity'})
     full_df = image_df.merge(text_df, how='left', on=['text1', 'text2'])
     full_df.to_csv(output_csv, index=False)
+
+def calculate_accuracy(drawing_embedding, text_embeddings_list, target_category, logit=100):
+    """Calculate recognizability using softmax of cosine similarities"""
+    similarities = []
+    # Calculate cosine similarities with all text embeddings
+    for text_doc in text_embeddings_list:
+        # Calculate cosine similarity (1 - cosine distance)
+        similarity = cosine_sim(drawing_embedding, text_doc.embedding)
+        similarities.append(similarity*logit)
+    # Apply softmax to get probabilities
+    probabilities = softmax(similarities)
+    # Find the index of the target category
+    target_idx = None
+    for i, text_doc in enumerate(text_embeddings_list):
+        # only break if it's an exact match, otherwise accept a substring which is very common in settings like 'drawing of a xx'
+        if target_category.lower() == text_doc.text.lower():
+            target_idx = i
+            break
+        elif target_category.lower() in text_doc.text.lower(): 
+            target_idx = i
+    if target_idx is not None:
+        return probabilities[target_idx]
+    else:
+        return 0.0  # Return 0 if category not found
+    

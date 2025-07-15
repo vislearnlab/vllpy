@@ -3,11 +3,6 @@ from vislearnlabpy.models.feature_generator import FeatureGenerator
 from vislearnlabpy.embeddings import utils
 from torchvision import transforms
 import torch
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
-import os
-from pathlib import Path
 
 class MultimodalModel(FeatureGenerator):
     """Abstract base class for multimodal models like CLIP and CVCL that extends FeatureGenerator"""
@@ -20,7 +15,7 @@ class MultimodalModel(FeatureGenerator):
     def preprocess_image(self, image):
         if isinstance(image, torch.Tensor):  
             transform = transforms.ToPILImage()
-            image = transform(image) 
+            image = transform(image)
         return self.preprocess(image).unsqueeze(0).to(self.device)
 
     def preprocess_text(self, text):

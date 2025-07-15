@@ -35,7 +35,7 @@ def indexed_embeddings(embedding):
 
 def cleaned_doc_path(doc_path):
     if not os.path.isabs(doc_path.removeprefix("file://")):
-        doc_path = str(Path(f"{os.getcwd()}/{doc_path.removeprefix("file://")}"))
+        doc_path = str(Path(f"{os.getcwd()}/{doc_path.removeprefix('file://')}"))
     doc_path = doc_path.removesuffix(".docs")
     if not doc_path.startswith("file://"):
         doc_path = f"file://{doc_path}"
@@ -144,3 +144,5 @@ def filter_embeddings(store, alignment_val=0.26):
                 filtered_store.add_embedding(embedding=embedding, url=img_path, text=text)
     print(f"Total rows in filtered_embeddings: {len(filtered_store.EmbeddingList)}")
     return filtered_store
+
+    

@@ -12,14 +12,15 @@ from pathlib import Path
 from tqdm import tqdm
 
 class EmbeddingGenerator():
-    def __init__(self, device=None, model_type="clip", model=None, output_type="csv", normalize_embeddings=False):
+    def __init__(self, device=None, model_type="clip", model=None, output_type="csv", normalize_embeddings=False, transform=None):
         if device is None:
             self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
         self.model_type = model_type
-        self.model = model or CLIPGenerator()
+        self.model = model or CLIPGenerator(device=device)
         self.output_type = output_type
+        self.transform = transform
         self.normalize_embeddings = normalize_embeddings
 
     def save_embedding(self, embedding, curr_id, save_path, text=None):
@@ -76,7 +77,7 @@ class EmbeddingGenerator():
             store.to_doc(filepath.removesuffix(".csv"))
     
     def save_text_embeddings(self, texts, save_path, overwrite):
-        store = EmbeddingStore(EmbeddingType=CLIPTextEmbedding)
+        store = EmbeddingStore(EmbeddingType=CLIPTextEmbedding, FeatureGenerator=self.model)
         filepath, full_save_path = self.create_files(type="text", save_path=save_path)
         existing_row_ids = EmbeddingGenerator._get_existing_row_ids(filepath)
         with torch.no_grad():
@@ -93,7 +94,7 @@ class EmbeddingGenerator():
         self.save_embedding_paths(row_data, store, filepath, full_save_path, overwrite)
         
     def save_image_embeddings(self, save_path=None, overwrite=False, save_every_batch=False):
-        store = EmbeddingStore(EmbeddingType=CLIPImageEmbedding)
+        store = EmbeddingStore(EmbeddingType=CLIPImageEmbedding, FeatureGenerator=self.model)
         filepath, full_save_path = self.create_files(save_path)
         existing_row_ids = EmbeddingGenerator._get_existing_row_ids(filepath)
         all_text = set()
@@ -130,7 +131,8 @@ class EmbeddingGenerator():
             images_dataloader = StimuliLoader(
                 image_folder=input_dir,
                 batch_size=batch_size,
-                stimuli_type="images"
+                stimuli_type="images",
+                transform=self.transform
             ).dataloader()
         else:
             images_dataloader = StimuliLoader(
@@ -138,7 +140,8 @@ class EmbeddingGenerator():
                 dataset_file=input_csv,
                 batch_size=batch_size,
                 stimuli_type="images",
-                id_column=id_column
+                id_column=id_column,
+                transform=self.transform
             ).dataloader()
         self.model = CLIPGenerator(device=self.device, dataloader=images_dataloader)
         self.save_image_embeddings(save_path=output_path,overwrite=overwrite, save_every_batch=save_every_batch)

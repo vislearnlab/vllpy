@@ -56,7 +56,7 @@ class FeatureGenerator(ABC):
                     if pair not in text_set:
                         curr_similarities = self.similarities(text1, text2, images)[0]
                         curr_similarities["stimuli_id"] = d['item_id'][0]
-                        curr_similarities["row_id"] = f"{curr_similarities["stimuli_id"]}_{count}"
+                        curr_similarities["row_id"] = f"{curr_similarities['stimuli_id']}_{count}"
                         similarity_data.append(self.format_similarity_row(text1, text2, curr_similarities))
                         text_set.add(pair)
                 if len(similarity_data) > 0:

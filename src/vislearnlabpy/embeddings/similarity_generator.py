@@ -39,7 +39,7 @@ class SimilarityGenerator():
         ]
         return(self._save_csv(similarities, output_csv))
         
-    def specific_sims(self, embeddings, text_pairs, output_csv=None):
+    def specific_sims(self, embeddings, text_pairs: List[Tuple[str, str]], output_csv=None):
         df = embeddings.to_dataframe()
         # Process all combinations of embeddings and texts
         similarities = []
@@ -64,5 +64,4 @@ class SimilarityGenerator():
                     f"Skipping missing pair of {text1} and {text2}")
         # Save to CSV
         return(self._save_csv(similarities, output_csv))
-    
     

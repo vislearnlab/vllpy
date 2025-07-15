@@ -1,6 +1,6 @@
 # vllpy
 
-This is a package with common utility functions, files and pipelines for the Visual Learning Lab. Creating a conda environment is recommended but optional. This package uses python=3.12.
+This is a package with common utility functions, files and pipelines for the Visual Learning Lab. Creating a conda environment is recommended but optional. This package uses python>=3.11.
 
 ```
 conda create -n vislearnlabpy python=3.12
@@ -14,7 +14,7 @@ pip install git+https://github.com/openai/CLIP.git
 pip install --upgrade vislearnlabpy
 ```
 
-To install PyTorch on the Tversky server, run:
+You will need the right version of PyTorch as well, that may be installed by default with CLIP. To install PyTorch on the Tversky server, run:
 ```
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
