@@ -14,7 +14,6 @@ from dataclasses import dataclass
 import os
 import csv
 from pathlib import Path
-import cairosvg        
 from tqdm import tqdm
 
 @dataclass
@@ -121,7 +120,6 @@ class AudioExtractor():
                 for fmt in ["wav", "m4a", "webm", "ogg"]:
                     try:
                         audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format=fmt)
-                        print(f"Detected format: {fmt}")
                         break
                     except:
                         continue
@@ -140,7 +138,6 @@ class AudioExtractor():
                 else:
                     with open(filename, "wb") as f:
                         f.write(audio_bytes)
-                print(f"Saved MP3 to {filename} (duration: {duration_sec:.2f} sec)")
                 return True
             else:
                 print(f"Audio too short: {duration_sec:.2f} sec (not saved)")
@@ -203,10 +200,10 @@ class MongoExtractor():
             return True, skip_count
         return False, skip_count
 
-    def _get_stroke_records(self, collection, session_id, trial_num):
+    def _get_stroke_records(self, session_id, trial_num):
         """Get stroke records for a given session and trial"""
-        timing_field = self._get_timing_field(collection, 'start')
-        return list(collection.find({'$and': [
+        timing_field = self._get_timing_field('start')
+        return list(self.collection.find({'$and': [
             {'sessionId': session_id}, 
             {'dataType': 'stroke'},
             {'trialNum': trial_num}
@@ -280,7 +277,6 @@ class MongoExtractor():
             header=not file_exists,
             index=False,
         )
-        print(f"{'Appended to' if file_exists else 'Saved'} {output_file}")
 
     def extract_images(self, image_dir=None, imsize=224, transform_file=False):
         if image_dir is None:
@@ -298,7 +294,7 @@ class MongoExtractor():
 
         for session_id in tqdm(sessions_to_render, desc="Drawing sessions processed"):
             # Get image records
-            timing_field = self._get_timing_field(self.collection, 'start')
+            timing_field = self._get_timing_field('start')
             image_recs = list(self.collection.find({'$and': [
                 {'sessionId': session_id}, 
                 {'dataType': 'finalImage'}
@@ -315,15 +311,17 @@ class MongoExtractor():
             # Process if enough trials and no interference
             if len(image_recs) > 3:
                 for imrec in image_recs:
+                    if 'category' not in imrec or imrec['category'] is None:
+                        continue
                     category_name = "_".join(imrec['category'].split())
-                    category_dir = self._create_category_dir(self.sketch_dir, category_name)
+                    category_dir = self._create_category_dir(image_dir, category_name)
                     
                     # Create filenames
                     base_filename = f"{category_name}_sketch_{imrec['participantID']}_{imrec['sessionId']}"
                     fname = os.path.join(category_dir, f"{base_filename}.png")
                     
                     # Check if file exists
-                    should_skip, skip_count = self._should_skip_existing_file(fname, skip_count, imrec)
+                    should_skip, skip_count = self._should_skip_existing_file(fname, skip_count)
                     if should_skip:
                         continue
                     # Get stroke records
@@ -359,8 +357,10 @@ class MongoExtractor():
                             time_spent = (time.time() - time_start) / 60
                             print(f'Wrote {write_count} images in {time_spent:.1f} minutes')
 
-        # Save final DataFrame
-        self._save_dataframe(trials, 'AllDescriptives_images', write_count)
+            # Save DataFrame after every session write
+            self._save_dataframe(trials, 'AllDescriptives_images', self.collection.name)
+            trials = []
+        print(f"Finished processing {write_count} image files")
 
     def extract_audio(self, audio_dir=None):
         if audio_dir is None:
@@ -381,14 +381,16 @@ class MongoExtractor():
             ]}).sort('startTrialTime'))
 
             for audiorec in audio_recs:
+                if 'category' not in audiorec or audiorec['category'] is None:
+                    continue
                 category_name = "_".join(audiorec['category'].split())
-                category_dir = self._create_category_dir(self.audio_dir, category_name)
+                category_dir = self._create_category_dir(audio_dir, category_name)
                 
                 # Create filename
                 fname = os.path.join(category_dir, f"{category_name}_audio_{audiorec['participantID']}_{audiorec['sessionId']}.mp3")
                 
                 # Check if file exists
-                should_skip, skip_count = self._should_skip_existing_file(fname, skip_count, audiorec, self.collection)
+                should_skip, skip_count = self._should_skip_existing_file(fname, skip_count)
                 if should_skip:
                     continue
                 
@@ -397,14 +399,16 @@ class MongoExtractor():
                     write_count += 1
                     
                     # Extract timing info
-                    timing_info = self._extract_timing_info(audiorec, self.collection)
+                    timing_info = self._extract_timing_info(audiorec)
                     
                     # Store data
                     trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec['participantID'], fname, timing_info['submit_time'], audiorec['date'],
                                                  timing_info['readable_date'], timing_info['start_time'], timing_info['trial_duration']))
 
-        # Save final DataFrame
-        self._save_dataframe(trials, 'AllDescriptives_audio', write_count)
+            # Save DataFrame after every session write
+            self._save_dataframe(trials, 'AllDescriptives_audio', self.collection.name)
+            trials = []
+        print(f"Finished processing {write_count} audio files")
 
     def extract_strokes(self, session_id, trial_num, save_dir, save_type="csv"):
         """
@@ -426,19 +430,20 @@ class MongoExtractor():
         for i, strec in enumerate(stroke_recs, start=1):
             svg_text = strec["svg"]
             if save_type == "png":
+                import cairosvg        
                 # e.g. "ABC123_trial7_0001.png"
                 out_path = save_dir / f"{session_id}_trial{trial_num}_{i:04d}.png"
                 cairosvg.svg2png(bytestring=svg_text.encode(), write_to=str(out_path))
 
             elif save_type == "csv":
                 # one CSV per stroke (change i→None to keep appending to one file)
-                out_path = save_dir / f"{session_id}_trial{trial_num}_{i:04d}.csv"
+                out_path = save_dir / f"{session_id}_trial{trial_num}.csv"
                 file_exists = out_path.exists()
                 mode = "a" if file_exists else "w"
                 with open(out_path, mode, newline="") as f:
                     writer = csv.writer(f)
                     if not file_exists:                       # write header once
-                        writer.writerow(["session_id", "trial_num", "svg"])
-                    writer.writerow([session_id, trial_num, svg_text])
+                        writer.writerow(["session_id", "trial_num", "stroke_num", "svg"])
+                    writer.writerow([session_id, trial_num, i, svg_text])
             else:
                 raise ValueError("save_type must be 'png' or 'csv'")

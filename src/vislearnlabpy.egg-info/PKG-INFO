@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: vislearnlabpy
-Version: 0.0.1.11
+Version: 0.0.1.12
 Summary: Visual Learning Lab utility files and pipelines
 Author-email: Tarun Sepuri <tarunsepuri@gmail.com>
 License-Expression: MIT
@@ -21,6 +21,7 @@ Requires-Dist: protobuf>=6.30.2
 Requires-Dist: scipy>=1.15.2
 Requires-Dist: pymongo>=4.13.2
 Requires-Dist: python-dotenv>=1.1.1
+Requires-Dist: cairosvg>=2.8.2
 Dynamic: license-file
 
 # vllpy
