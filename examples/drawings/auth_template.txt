@@ -1,0 +1,1 @@
+mongodb+srv://USERNAME:PASSWORD@dbaas-db-3323175-86deb001.mongo.ondigitalocean.com/admin?tls=true&authSource=admin
