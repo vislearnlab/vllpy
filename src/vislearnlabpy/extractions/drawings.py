@@ -149,12 +149,18 @@ class AudioExtractor():
 
 
 class MongoExtractor():
-    def __init__(self, conn_str, database_name, collection_name, output_dir="mongo_output"):
+    def __init__(self, conn_str, database_name, collection_name, output_dir="mongo_output", date=None):
         conn = pm.MongoClient(conn_str)
         self.database = conn[database_name]
         self.collection = self.database[collection_name]
         self.output_dir = output_dir
-
+        if date is not None:
+            try:
+                self.date = datetime.strptime(date,  "%Y%m%d").date()
+            except ValueError:
+                raise ValueError("Invalid date format. Please use YYYYMMDD.")
+        else:
+            self.date = None
 
     def _is_cdm_run_v3(self):
         """Check if collection is cdm_run_v3"""
@@ -262,10 +268,13 @@ class MongoExtractor():
         
         return this_intensity, this_bounding_box
 
+    def _output_filename(self, filename_prefix, run_name):
+        return os.path.join(self.output_dir, f"{filename_prefix}_final_{run_name}.csv")
+    
     def _save_dataframe(self, data_dict, filename_prefix, run_name):
         """Save or append rows to <prefix>_final_<run>.csv in output_dir."""
         df = pd.DataFrame(data_dict)
-        output_file = os.path.join(self.output_dir, f"{filename_prefix}_final_{run_name}.csv")
+        output_file = self._output_filename(filename_prefix, run_name)
 
         file_exists = os.path.isfile(output_file)
 
@@ -278,6 +287,24 @@ class MongoExtractor():
             index=False,
         )
 
+    def _render_unprocessed_sessions(self, filename_prefix, sessions_to_render):
+        output_file = self._output_filename(filename_prefix, self.collection.name)
+        if os.path.exists(output_file):
+            existing_sessions = pd.read_csv(output_file)
+            sessions_to_render = [s for s in sessions_to_render if s not in existing_sessions['session_id'].values]
+        return sessions_to_render
+    
+    def _add_date_query(self, query):
+        if self.date is not None:
+            # Convert self.date to a timestamp range (start of day to end of day)
+            start_of_day = datetime.datetime.combine(self.date, datetime.time.min)
+            end_of_day = datetime.datetime.combine(self.date, datetime.time.max)
+            query[self._get_timing_field('start')] = {
+                '$gte': start_of_day.timestamp() * 1000,
+                '$lte': end_of_day.timestamp() * 1000
+            }
+        return query
+
     def extract_images(self, image_dir=None, imsize=224, transform_file=False):
         if image_dir is None:
             image_dir = os.path.join(self.output_dir, 'sketches_full_dataset')
@@ -288,8 +315,11 @@ class MongoExtractor():
         
         # Initialize data storage
         trials = []
+        query = {'dataType': 'finalImage'}
         # Get all sessions
-        sessions_to_render = list(self.collection.find({'$and': [{'dataType':'finalImage'}]}).distinct('sessionId'))
+        sessions_to_render = list(self.collection.find(self._add_date_query(query)).distinct('sessionId'))
+        sessions_to_render = self._render_unprocessed_sessions('AllDescriptives_images', sessions_to_render)
+
         time_start = time.time()
 
         for session_id in tqdm(sessions_to_render, desc="Drawing sessions processed"):
@@ -362,7 +392,7 @@ class MongoExtractor():
             trials = []
         print(f"Finished processing {write_count} image files")
 
-    def extract_audio(self, audio_dir=None):
+    def extract_audio(self, audio_dir=None, min_length=1):
         if audio_dir is None:
             audio_dir = os.path.join(self.output_dir, 'audio_full_dataset')
         # Initialize tracking variables
@@ -371,9 +401,10 @@ class MongoExtractor():
         # Initialize data storage
         trials = []
         # Get all sessions
-        sessions_to_render = list(self.collection.find({'$and': [{'dataType':'knowledge'}]}).distinct('sessionId'))
-        print(f"Processing {len(sessions_to_render)} sessions for audio extraction")
-        
+        query = {'dataType': 'knowledge'}
+        sessions_to_render = list(self.collection.find(self._add_date_query(query)).distinct('sessionId'))
+        sessions_to_render = self._render_unprocessed_sessions('AllDescriptives_audio', sessions_to_render)
+        print(f"Processing {len(sessions_to_render)} sessions for audio extraction") 
         for session_id in tqdm(sessions_to_render, desc="Knowledge trial sessions processed"):
             audio_recs = list(self.collection.find({'$and': [
                 {'sessionId': session_id}, 
@@ -395,7 +426,7 @@ class MongoExtractor():
                     continue
                 
                 # Try to save audio
-                if AudioExtractor.save_mp3_if_long_enough(audiorec['audioData'], filename=fname):
+                if AudioExtractor.save_mp3_if_long_enough(audiorec['audioData'], filename=fname, min_duration_sec=min_length):
                     write_count += 1
                     
                     # Extract timing info
@@ -404,6 +435,9 @@ class MongoExtractor():
                     # Store data
                     trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec['participantID'], fname, timing_info['submit_time'], audiorec['date'],
                                                  timing_info['readable_date'], timing_info['start_time'], timing_info['trial_duration']))
+                else:
+                    skip_count += 1
+                    trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec['participantID'], 'NA', 'NA', 'NA', 'NA', 'NA', 'NA'))
 
             # Save DataFrame after every session write
             self._save_dataframe(trials, 'AllDescriptives_audio', self.collection.name)

@@ -131,3 +131,32 @@ class EmbeddingStore():
             return(sim_generator.all_sims(self.EmbeddingList.embedding, keys, output_path))
         else:
             return(sim_generator.specific_sims(self.EmbeddingList, text_pairs, output_path))
+
+    def compute_text_rdm(self, sim_type="cosine", output_path=None):
+        from vislearnlabpy.embeddings.similarity_utils import compute_rdm, plot_rdm
+        texts = self.EmbeddingList.text
+        if texts is None:
+            raise ValueError("No text column in embeddings")
+        # Unique texts
+        unique_texts = sorted(set(texts))
+        # Compute mean embedding for each unique text
+        text_means = []
+        for text in unique_texts:
+            embeddings_for_text = [emb.embedding for emb in self.EmbeddingList if emb.text == text]
+            if not embeddings_for_text:
+                continue
+            mean_embedding = np.mean(embeddings_for_text, axis=0)
+            text_means.append(mean_embedding)
+        text_means = np.stack(text_means)
+        # Compute RDM
+        rdm = compute_rdm(text_means, method=sim_type)
+        # Plot RDM if output_path is given
+        if output_path:
+            plot_rdm(
+                out_path=output_path,
+                X=text_means,
+                method=sim_type,
+                x_labels=unique_texts,
+                y_labels=unique_texts
+            )
+        return rdm

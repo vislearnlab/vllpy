@@ -114,6 +114,8 @@ def plot_rdm(
     format: str = ".png",
     colormap: str = "cividis",
     show_plot: bool = False,
+    x_labels: list = None,  # Optional parameter for x-axis labels
+    y_labels: list = None   # Optional parameter for y-axis labels
 ) -> None:
     """Compute and plot representational dissimilarity matrix based on some distance measure.
 
@@ -142,11 +144,15 @@ def plot_rdm(
     rdm = compute_rdm(X, method)
     plt.figure(figsize=(10, 4), dpi=200)
     plt.imshow(rankdata(rdm).reshape(rdm.shape), cmap=getattr(plt.cm, colormap))
-    plt.xticks([])
-    plt.yticks([])
+    # Set x and y axis labels if provided
+    if x_labels is not None:
+        plt.xticks(ticks=np.arange(len(x_labels)), labels=x_labels, rotation=90)
+    if y_labels is not None:
+        plt.yticks(ticks=np.arange(len(y_labels)), labels=y_labels)
+    plt.tick_params(labelsize=4)
     plt.tight_layout()
     if not os.path.exists(out_path):
-        print("\n...Output directory did not exist. Creating directories.\n")
+        print("\n...Output directory did not exists. Creating directories.\n")
         os.makedirs(out_path)
     plt.savefig(os.path.join(out_path, "".join(("rdm", format))))
     if show_plot:
