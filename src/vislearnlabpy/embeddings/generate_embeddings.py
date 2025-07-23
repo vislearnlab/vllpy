@@ -73,7 +73,7 @@ class EmbeddingGenerator():
     def save_embedding_paths(self, row_data, store, filepath, full_save_path, overwrite):
         if self.output_type != "doc" and len(row_data) > 0:
             save_df(pd.DataFrame(row_data), Path(filepath).name, full_save_path, overwrite=overwrite)
-        else:
+        elif self.output_type == "doc":
             store.to_doc(filepath.removesuffix(".csv"))
     
     def save_text_embeddings(self, texts, save_path, overwrite):

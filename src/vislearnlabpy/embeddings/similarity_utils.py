@@ -41,12 +41,13 @@ def correlation_matrix(X: Array, a_min: float = -1.0, a_max: float = 1.0) -> Arr
     corr_mat = (cov / denom).clip(min=a_min, max=a_max)
     return corr_mat
 
-def cosine_matrix(X: Array, a_min: float = -1.0, a_max: float = 1.0) -> Array:
+def cosine_matrix(X: Array, Y: Array=None, a_min: float = -1.0, a_max: float = 1.0) -> Array:
     """Compute dissimilarity matrix based on cosine distance (on the matrix-level)."""
-    num = X @ X.T
+    if Y is None:
+        Y = X
+    num = X @ Y.T
     # compute vector l2-norm across rows
-    l2_norms = np.linalg.norm(X, axis=1)
-    denom = np.outer(l2_norms, l2_norms)
+    denom = np.outer(np.linalg.norm(X, axis=1), np.linalg.norm(Y, axis=1))
     cos_mat = (num / denom).clip(min=a_min, max=a_max)
     return cos_mat
 
@@ -191,8 +192,8 @@ def text_image_sims_from_stores(
     full_df = image_df.merge(text_df, how='left', on=['text1', 'text2'])
     full_df.to_csv(output_csv, index=False)
 
-def calculate_accuracy(drawing_embedding, text_embeddings_list, target_category, logit=100):
-    """Calculate recognizability using softmax of cosine similarities"""
+def calculate_probability(drawing_embedding, text_embeddings_list, target_category, logit=100):
+    """Calculate probability of right detection using softmax of cosine similarities"""
     similarities = []
     # Calculate cosine similarities with all text embeddings
     for text_doc in text_embeddings_list:
