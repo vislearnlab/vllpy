@@ -121,13 +121,22 @@ class EmbeddingStore():
         retrieved_docs, scores = doc_index.find(query, search_field='normed_embedding', limit=limit)
         return retrieved_docs, scores
 
+    def retrieve_cross_similarity(self, embedding_list, sim_type="cosine"):
+        sim_generator = SimilarityGenerator(similarity_type=sim_type, model=self.FeatureGenerator.model)
+        return(sim_generator.cross_sims(self.EmbeddingList, embedding_list))
+    
     def retrieve_similarities(self, sim_type="cosine", output_path=None, text_pairs=None):
         sim_generator = SimilarityGenerator(similarity_type=sim_type, model=self.FeatureGenerator.model)
         if text_pairs is None:
             # again assuming url as id, followed by text. Wondering now if we do need an explicit id column.
             texts = self.EmbeddingList.text
             urls = self.EmbeddingList.url
-            keys = urls or texts or None
+            if urls and urls[0] is not None:
+                keys = urls
+            elif texts:
+                keys = texts
+            else:
+                keys = None
             return(sim_generator.all_sims(self.EmbeddingList.embedding, keys, output_path))
         else:
             return(sim_generator.specific_sims(self.EmbeddingList, text_pairs, output_path))

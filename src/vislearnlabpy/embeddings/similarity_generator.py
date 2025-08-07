@@ -32,9 +32,10 @@ class SimilarityGenerator():
     
     def all_sims(self, embeddings, texts, output_csv=None):
         embeddings = np.stack(embeddings)
+        sim_matrix = self.sim_matrix_fn(embeddings)
         similarities = [
             {
-                f"{self.similarity_type}_similarity": round(float(self.sim_matrix_fn[i, j]), 4),
+                f"{self.similarity_type}_similarity": round(float(sim_matrix[i, j]), 4),
                 "text1": f"{texts[i]}",
                 "text2": f"{texts[j]}"
             }
