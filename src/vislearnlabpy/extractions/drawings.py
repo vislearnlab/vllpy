@@ -1,6 +1,7 @@
 import pymongo as pm
 from pydub import AudioSegment
 from io import StringIO
+import logging
 from vislearnlabpy.embeddings.stimuli_loader import ImageExtractor
 import io
 import base64
@@ -15,6 +16,9 @@ import os
 import csv
 from pathlib import Path
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DrawingTrial:
@@ -304,6 +308,14 @@ class MongoExtractor():
                 '$lte': end_of_day.timestamp() * 1000
             }
         return query
+    
+    def _participant_id_col(self, rec):
+        if "participantID" in rec:
+            return "participantID"
+        elif "age" in rec:
+            return "age"
+        else:
+            return None
 
     def extract_images(self, image_dir=None, imsize=224, transform_file=False):
         if image_dir is None:
@@ -343,11 +355,15 @@ class MongoExtractor():
                 for imrec in image_recs:
                     if 'category' not in imrec or imrec['category'] is None:
                         continue
+                    participant_id_col = self._participant_id_col(imrec)
+                    if participant_id_col is None:
+                        logger.warning(f"Participant ID not found in image record, skipping: {imrec}")
+                        continue
                     category_name = "_".join(imrec['category'].split())
                     category_dir = self._create_category_dir(image_dir, category_name)
                     
                     # Create filenames
-                    base_filename = f"{category_name}_sketch_{imrec['participantID']}_{imrec['sessionId']}"
+                    base_filename = f"{category_name}_sketch_{imrec[participant_id_col]}_{imrec['sessionId']}"
                     fname = os.path.join(category_dir, f"{base_filename}.png")
                     
                     # Check if file exists
@@ -369,7 +385,7 @@ class MongoExtractor():
                         # Store data
                         trials.append(
                             DrawingTrial(
-                                imrec["sessionId"], imrec["trialNum"], category_name, imrec["participantID"],
+                                imrec["sessionId"], imrec["trialNum"], category_name, imrec[participant_id_col],
                                 fname, timing_info["submit_time"], imrec["date"], timing_info["readable_date"],
                                 timing_info["start_time"], timing_info["trial_duration"], len(stroke_recs),
                                 draw_duration, intensity, bounding_box
@@ -412,13 +428,17 @@ class MongoExtractor():
             ]}).sort('startTrialTime'))
 
             for audiorec in audio_recs:
+                participant_id_col = self._participant_id_col(audiorec)
+                if participant_id_col is None:
+                    logger.warning(f"Participant ID not found in audio record, skipping: {audiorec}")
+                    continue
                 if 'category' not in audiorec or audiorec['category'] is None:
                     continue
                 category_name = "_".join(audiorec['category'].split())
                 category_dir = self._create_category_dir(audio_dir, category_name)
                 
                 # Create filename
-                fname = os.path.join(category_dir, f"{category_name}_audio_{audiorec['participantID']}_{audiorec['sessionId']}.mp3")
+                fname = os.path.join(category_dir, f"{category_name}_audio_{audiorec[participant_id_col]}_{audiorec['sessionId']}.mp3")
                 
                 # Check if file exists
                 should_skip, skip_count = self._should_skip_existing_file(fname, skip_count)
@@ -433,11 +453,11 @@ class MongoExtractor():
                     timing_info = self._extract_timing_info(audiorec)
                     
                     # Store data
-                    trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec['participantID'], fname, timing_info['submit_time'], audiorec['date'],
+                    trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec[participant_id_col], fname, timing_info['submit_time'], audiorec['date'],
                                                  timing_info['readable_date'], timing_info['start_time'], timing_info['trial_duration']))
                 else:
                     skip_count += 1
-                    trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec['participantID'], 'NA', 'NA', 'NA', 'NA', 'NA', 'NA'))
+                    trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec[participant_id_col], 'NA', 'NA', 'NA', 'NA', 'NA', 'NA'))
 
             # Save DataFrame after every session write
             self._save_dataframe(trials, 'AllDescriptives_audio', self.collection.name)
