@@ -7,13 +7,16 @@ src/vislearnlabpy.egg-info/SOURCES.txt
 src/vislearnlabpy.egg-info/dependency_links.txt
 src/vislearnlabpy.egg-info/requires.txt
 src/vislearnlabpy.egg-info/top_level.txt
+src/vislearnlabpy/drawings/drawing.py
+src/vislearnlabpy/drawings/svg_render_helpers.py
 src/vislearnlabpy/embeddings/embedding_store.py
 src/vislearnlabpy/embeddings/generate_embeddings.py
 src/vislearnlabpy/embeddings/similarity_generator.py
 src/vislearnlabpy/embeddings/similarity_utils.py
 src/vislearnlabpy/embeddings/stimuli_loader.py
 src/vislearnlabpy/embeddings/utils.py
-src/vislearnlabpy/extractions/drawings.py
+src/vislearnlabpy/extractions/drawingtask_extractor.py
+src/vislearnlabpy/extractions/mongo_extractor.py
 src/vislearnlabpy/models/clip_model.py
 src/vislearnlabpy/models/feature_generator.py
 src/vislearnlabpy/models/multimodal_model.py

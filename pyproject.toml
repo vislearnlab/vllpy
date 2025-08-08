@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vislearnlabpy"
-version = "0.0.1.15"
+version = "0.0.2.0"
 authors = [
   { name="Tarun Sepuri", email="tarunsepuri@gmail.com" },
 ]
@@ -19,7 +19,7 @@ dependencies = [
   "scipy>=1.15.2",
   "pymongo>=4.13.2",
   "python-dotenv>=1.1.1",
-  "cairosvg>=2.8.2"
+  "svgpathtools>=1.7.1"
 ]
 description = "Visual Learning Lab utility files and pipelines"
 readme = "README.md"

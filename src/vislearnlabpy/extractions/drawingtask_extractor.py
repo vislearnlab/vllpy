@@ -1,7 +1,8 @@
-import pymongo as pm
 from pydub import AudioSegment
 from io import StringIO
 import logging
+
+from typing import Optional, Tuple
 from vislearnlabpy.embeddings.stimuli_loader import ImageExtractor
 import io
 import base64
@@ -14,18 +15,26 @@ import time
 from dataclasses import dataclass
 import os
 import csv
-from pathlib import Path
+import pathlib
 from tqdm import tqdm
+from vislearnlabpy.drawings.svg_render_helpers import *
+
+from vislearnlabpy.extractions.mongo_extractor import MongoExtractor
 
 logger = logging.getLogger(__name__)
 
+save_format_to_field_map = {
+    "session_id": "sessionId",
+    "participant_id": "participantID",
+    "trial_num": "trialNum"
+}
 
 @dataclass
 class DrawingTrial:
     session_id: str
     trial_num: int
     category: str
-    participantID: str
+    participant_id: str
     filename: str
     submit_time: float
     submit_date: str
@@ -35,28 +44,34 @@ class DrawingTrial:
     num_strokes: int
     draw_duration: float
     mean_intensity: float
-    bounding_box: tuple
+    bounding_box: Tuple[int, int, int, int]
+    age: Optional[str] =None
 
 @dataclass
 class KnowledgeTrial:
     session_id: str
     trial_num: int
     category: str
-    participantID: str
+    participant_id: str 
     filename: str
     submit_time: float
     submit_date: str
     submit_date_readable: str
     start_time: float
     trial_duration: float
+    age: Optional[str] = None  # Optional field for age, if available
 
 @dataclass
 class StrokeData:
     session_id: str
+    participant_id: str
     trial_num: int
     category: str
     stroke_num: int
     filename: str
+    start_time: float
+    submit_time: float
+    age: Optional[str] = None
 
 class DrawingsExtractor():
     @staticmethod
@@ -152,19 +167,9 @@ class AudioExtractor():
             return False
 
 
-class MongoExtractor():
+class DrawingTaskExtractor(MongoExtractor):
     def __init__(self, conn_str, database_name, collection_name, output_dir="mongo_output", date=None):
-        conn = pm.MongoClient(conn_str)
-        self.database = conn[database_name]
-        self.collection = self.database[collection_name]
-        self.output_dir = output_dir
-        if date is not None:
-            try:
-                self.date = datetime.strptime(date,  "%Y%m%d").date()
-            except ValueError:
-                raise ValueError("Invalid date format. Please use YYYYMMDD.")
-        else:
-            self.date = None
+        super().__init__(conn_str, database_name, collection_name, output_dir, date)
 
     def _is_cdm_run_v3(self):
         """Check if collection is cdm_run_v3"""
@@ -197,8 +202,7 @@ class MongoExtractor():
     def _create_category_dir(self, base_dir, category_name):
         """Create category directory if it doesn't exist"""
         category_dir = os.path.join(base_dir, category_name)
-        if not os.path.exists(category_dir):
-            os.makedirs(category_dir)
+        os.makedirs(category_dir, exist_ok=True)
         return category_dir
 
     def _should_skip_existing_file(self, filepath, skip_count):
@@ -291,6 +295,19 @@ class MongoExtractor():
             index=False,
         )
 
+
+    def _render_unprocessed_sessions_with_cats(self, filename_prefix, sessions_to_render_with_cats):
+        output_file = self._output_filename(filename_prefix, self.collection.name)
+        if os.path.exists(output_file):
+            existing = pd.read_csv(output_file)
+            existing_pairs = set(zip(existing['session_id'], existing['category']))
+            sessions_to_render = [s for s, c in sessions_to_render_with_cats 
+                                if (s, c) not in existing_pairs]
+        else:
+            sessions_to_render = [s for s, _ in sessions_to_render_with_cats]
+        
+        return list(dict.fromkeys(sessions_to_render))  # Dedupe preserving order
+
     def _render_unprocessed_sessions(self, filename_prefix, sessions_to_render):
         output_file = self._output_filename(filename_prefix, self.collection.name)
         if os.path.exists(output_file):
@@ -312,10 +329,20 @@ class MongoExtractor():
     def _participant_id_col(self, rec):
         if "participantID" in rec:
             return "participantID"
-        elif "age" in rec:
-            return "age"
+        # session id is still a unique participant identifier, as opposed to age
+        elif "sessionId" in rec:
+            return "sessionId"
         else:
             return None
+
+    def _age_participant_parts(self, age, participant_id, session_id):
+        age_part = f"{age}_" if age is not None else ""
+        participant_part = f"{participant_id}_" if participant_id != session_id else ""
+        return age_part, participant_part
+
+    def _formatted_filename(self, extraction_type, category, participant_id, session_id, age=None):
+        age_part, participant_part = self._age_participant_parts(age, participant_id, session_id)
+        return f"{category}_{extraction_type}_{age_part}{participant_part}_{session_id}"
 
     def extract_images(self, image_dir=None, imsize=224, transform_file=False):
         if image_dir is None:
@@ -363,7 +390,7 @@ class MongoExtractor():
                     category_dir = self._create_category_dir(image_dir, category_name)
                     
                     # Create filenames
-                    base_filename = f"{category_name}_sketch_{imrec[participant_id_col]}_{imrec['sessionId']}"
+                    base_filename = self._formatted_filename("sketch", category_name, imrec[participant_id_col], imrec['sessionId'], imrec.get('age', None))
                     fname = os.path.join(category_dir, f"{base_filename}.png")
                     
                     # Check if file exists
@@ -388,7 +415,7 @@ class MongoExtractor():
                                 imrec["sessionId"], imrec["trialNum"], category_name, imrec[participant_id_col],
                                 fname, timing_info["submit_time"], imrec["date"], timing_info["readable_date"],
                                 timing_info["start_time"], timing_info["trial_duration"], len(stroke_recs),
-                                draw_duration, intensity, bounding_box
+                                draw_duration, intensity, bounding_box, imrec.get('age', None)
                             )
                         )
                         
@@ -438,8 +465,9 @@ class MongoExtractor():
                 category_dir = self._create_category_dir(audio_dir, category_name)
                 
                 # Create filename
-                fname = os.path.join(category_dir, f"{category_name}_audio_{audiorec[participant_id_col]}_{audiorec['sessionId']}.mp3")
-                
+                base_filename = self._formatted_filename("audio", category_name, audiorec[participant_id_col], audiorec['sessionId'], audiorec.get('age', None))
+                fname = os.path.join(category_dir, f"{base_filename}.mp3")
+
                 # Check if file exists
                 should_skip, skip_count = self._should_skip_existing_file(fname, skip_count)
                 if should_skip:
@@ -457,47 +485,164 @@ class MongoExtractor():
                                                  timing_info['readable_date'], timing_info['start_time'], timing_info['trial_duration']))
                 else:
                     skip_count += 1
-                    trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec[participant_id_col], 'NA', 'NA', 'NA', 'NA', 'NA', 'NA'))
+                    trials.append(KnowledgeTrial(audiorec['sessionId'], audiorec['trialNum'], category_name, audiorec[participant_id_col], None, None, None, None, None, None))
 
             # Save DataFrame after every session write
             self._save_dataframe(trials, 'AllDescriptives_audio', self.collection.name)
             trials = []
         print(f"Finished processing {write_count} audio files")
 
-    def extract_strokes(self, session_id, trial_num, save_dir, save_type="csv"):
+    def extract_strokes(self, save_dir=None, save_type="png", stroke_settings=StrokeSettings(), **filters):
         """
-        Pull stroke documents for *one* trial and save each stroke as either
-        a PNG image or a CSV of the SVG path data.
+        Extract stroke documents for all (or specified) sessions/trials.
+        Saves each stroke as PNG, GIF or CSV. SVG is in the works.
+        Also adding intensity and other metadata.
         """
-        save_dir = Path(save_dir)
+        if save_dir is None:
+            save_dir = os.path.join(self.output_dir, 'strokes_full_dataset')
+        save_dir = pathlib.Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
-        # qeury
-        sort_key = "time" if self._is_cdm_run_v3() else "startTrialTime"
-        stroke_recs = list(
-            self.collection
-                .find({"sessionId": session_id,
-                    "dataType": "stroke",
-                    "trialNum": trial_num})
-                .sort(sort_key)
-        )
-        # iterate through strokes
-        for i, strec in enumerate(stroke_recs, start=1):
-            svg_text = strec["svg"]
-            if save_type == "png":
-                import cairosvg        
-                # e.g. "ABC123_trial7_0001.png"
-                out_path = save_dir / f"{session_id}_trial{trial_num}_{i:04d}.png"
-                cairosvg.svg2png(bytestring=svg_text.encode(), write_to=str(out_path))
+        write_count = skip_count = 0
+        query = {'dataType': 'stroke'}
+        query.update({
+            save_format_to_field_map.get(key, key): {'$in': values}
+            for key, values in filters.items()
+            if values  # only include if values is non-empty
+        })
+        sessions_to_render_with_cats = list(set([
+            (doc['sessionId'], doc['category'])
+            for doc in self.collection.find(self._add_date_query(query), {'sessionId': 1, 'category': 1})
+        ]))
+        sessions_to_render = self._render_unprocessed_sessions_with_cats(f'AllDescriptives_strokes_{save_type}',
+                                                                  sessions_to_render_with_cats)
 
-            elif save_type == "csv":
-                # one CSV per stroke (change i→None to keep appending to one file)
-                out_path = save_dir / f"{session_id}_trial{trial_num}.csv"
-                file_exists = out_path.exists()
-                mode = "a" if file_exists else "w"
-                with open(out_path, mode, newline="") as f:
-                    writer = csv.writer(f)
-                    if not file_exists:                       # write header once
-                        writer.writerow(["session_id", "trial_num", "stroke_num", "svg"])
-                    writer.writerow([session_id, trial_num, i, svg_text])
-            else:
-                raise ValueError("save_type must be 'png' or 'csv'")
+        trials = []
+        
+        for session_id in tqdm(sessions_to_render, desc="Drawing sessions processed"):
+            timing_field = self._get_timing_field('start')
+            stroke_recs = list(self.collection.find({'$and': [
+                {'sessionId': session_id}, {'dataType': 'stroke'}
+            ]}).sort([(timing_field, 1)]))  # Sort only by start time
+            
+            if len(stroke_recs) <= 3:
+                continue
+            
+            # Group strokes by category
+            category_groups = {}
+            for strec in stroke_recs:
+                if 'category' not in strec or strec['category'] is None:
+                    continue
+                if 'category' in filters and strec['category'] not in filters['category']:
+                    continue
+                category = strec['category']
+                if category not in category_groups:
+                    category_groups[category] = []
+                category_groups[category].append(strec)
+            
+            # Process each category
+            for category, category_stroke_recs in category_groups.items():
+                if not category_stroke_recs:
+                    continue
+                    
+                participant_id_col = self._participant_id_col(category_stroke_recs[0])
+                if participant_id_col is None:
+                    continue
+                
+                participant_id = category_stroke_recs[0][participant_id_col]
+                age = category_stroke_recs[0].get('age', None)
+                trial_num = category_stroke_recs[0].get('trialNum', 0)
+                category_name = "_".join(category.split())
+                
+                # Create directory structure
+                category_dir = self._create_category_dir(save_dir, category_name)
+                age_part, participant_part = self._age_participant_parts(age, participant_id, session_id)
+                participant_session_dir = os.path.join(category_dir, f"{age_part}{participant_part}{session_id}")
+                os.makedirs(participant_session_dir, exist_ok=True)
+                base_filename = self._formatted_filename("stroke", category_name, participant_id, session_id, age)
+                if save_type == "png":
+                    # Use the existing SVG helper functions
+                    svg_list = make_svg_list(category_stroke_recs)
+                    # Get verts and codes
+                    Verts, Codes = get_verts_and_codes(svg_list)
+                    
+                    # Render and save as PNGs
+                    render_and_save(Verts,
+                                Codes,
+                                save_dir=participant_session_dir,
+                                base_filename=base_filename,
+                                stroke_settings=stroke_settings)
+
+                    # Count files created (render_and_save creates multiple files)
+                    write_count += len(Verts)
+                    
+                    # Add trial data for each stroke
+                    for i, _ in enumerate(Verts):
+                        out_path = f'{participant_session_dir}/{base_filename}_{i+1}.png'
+                        trials.append(StrokeData(session_id, participant_id, trial_num, 
+                                            category, i+1, out_path, 
+                                            category_stroke_recs[i].get(self._get_stroke_timing_field('start'), 0.0), 
+                                            category_stroke_recs[i].get(self._get_stroke_timing_field('end'), 0.0), age))
+                elif save_type == "gif":
+                    # Create GIF animation
+                    base_filename = f"{self._formatted_filename('stroke', category_name, participant_id, session_id, age)}.gif"
+                    out_path = os.path.join(participant_session_dir, base_filename)
+                    
+                    should_skip, skip_count = self._should_skip_existing_file(out_path, skip_count)
+                    if should_skip:
+                        continue
+                    
+                    create_stroke_animation_gif(category_stroke_recs, out_path, stroke_settings=stroke_settings)
+                    
+                    write_count += 1
+                    trials.append(StrokeData(session_id, participant_id, trial_num, 
+                                        category, len(category_stroke_recs), str(out_path), 
+                                        category_stroke_recs[0].get(self._get_stroke_timing_field('start'), 0.0), 
+                                        category_stroke_recs[len(category_stroke_recs) - 1].get(self._get_stroke_timing_field('end'), 0.0), age))
+
+                elif save_type == "csv":
+                    # Save as CSV
+                    out_path = os.path.join(participant_session_dir, f"{self._formatted_filename('stroke', category_name, participant_id, session_id, age)}.csv")
+                    with open(out_path, "w", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["session_id", "participantId", "trial_num", "stroke_num", "category", "svg"])
+                        for i, strec in enumerate(category_stroke_recs):
+                            writer.writerow([session_id, participant_id, trial_num, i+1, category, strec.get('svg', '')])
+                    
+                    write_count += len(category_stroke_recs)
+                    trials.append(StrokeData(session_id, participant_id, trial_num, 
+                                        category, len(category_stroke_recs), str(out_path), 
+                                        category_stroke_recs[0].get(self._get_stroke_timing_field('start'), 0.0), 
+                                        category_stroke_recs[len(category_stroke_recs) - 1].get(self._get_stroke_timing_field('end'), 0.0), age))
+                """
+                TODO: figure out svg saving
+                elif save_type == "svg":
+                    # Save individual SVG files
+                    for i, strec in enumerate(category_stroke_recs):
+                        svg_path = strec.get('svg', '')
+                        if not svg_path:
+                            continue
+                        
+                        base_filename = f"{category_name}_stroke_{participant_id}_{session_id}_stroke{i+1:03d}.svg"
+                        out_path = os.path.join(participant_session_dir, base_filename)
+                        
+                        should_skip, skip_count = self._should_skip_existing_file(out_path, skip_count)
+                        if should_skip:
+                            continue
+                        
+                        wrapped_svg = f'''<svg xmlns="http://www.w3.org/2000/svg" version="1.1" 
+                            width="800" height="800" viewBox="-100 -100 1000 1000">
+                            <path d="{svg_path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>'''
+                        
+                        with open(out_path, "w") as f:
+                            f.write(wrapped_svg)
+                        
+                        write_count += 1
+                        trials.append(StrokeData(session_id, participant_id, trial_num, 
+                                            category, i+1, str(out_path), 
+                                            strec.get('startTime', 0.0), strec.get('submitTime', 0.0)))
+                """
+
+        if trials:
+            self._save_dataframe([t.__dict__ for t in trials], f'AllDescriptives_strokes_{save_type}', self.collection.name)
+        print(f"Finished processing {write_count} stroke files (skipped {skip_count})")
