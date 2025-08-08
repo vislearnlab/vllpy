@@ -342,7 +342,7 @@ class DrawingTaskExtractor(MongoExtractor):
 
     def _formatted_filename(self, extraction_type, category, participant_id, session_id, age=None):
         age_part, participant_part = self._age_participant_parts(age, participant_id, session_id)
-        return f"{category}_{extraction_type}_{age_part}{participant_part}_{session_id}"
+        return f"{category}_{extraction_type}_{age_part}{participant_part}{session_id}"
 
     def extract_images(self, image_dir=None, imsize=224, transform_file=False):
         if image_dir is None:
