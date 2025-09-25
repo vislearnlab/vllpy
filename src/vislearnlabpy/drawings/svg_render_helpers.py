@@ -9,6 +9,7 @@ from matplotlib.path import Path
 import matplotlib.patches as patches
 from tqdm import tqdm
 import io
+import math
 from svgpathtools import parse_path
 
 @dataclass
@@ -180,7 +181,7 @@ def create_stroke_animation_gif(stroke_recs, output_path, stroke_settings:Stroke
     
     # Calculate total animation time and frame count
     total_duration = sum(stroke_timings)
-    total_frames = int(total_duration * stroke_settings.fps)
+    total_frames = math.ceil(total_duration * stroke_settings.fps) + 1
     frame_dt = 1.0 / stroke_settings.fps
     
     # Store frames for GIF creation
@@ -260,7 +261,7 @@ def create_stroke_animation_gif(stroke_recs, output_path, stroke_settings:Stroke
             elapsed_time += duration
         else:
             # All strokes complete
-            current_stroke = len(Verts)
+            current_stroke = len(Verts) - 1
             stroke_progress = 1.0
     
     # Save as GIF with optimization
