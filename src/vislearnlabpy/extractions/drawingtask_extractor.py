@@ -71,7 +71,9 @@ class StrokeData:
     filename: str
     start_time: float
     submit_time: float
+    bounding_box: Tuple[int, int, int, int] = (0, 0, 0, 0)
     age: Optional[str] = None
+    
 
 class DrawingsExtractor():
     @staticmethod
@@ -170,6 +172,7 @@ class AudioExtractor():
 class DrawingTaskExtractor(MongoExtractor):
     def __init__(self, conn_str, database_name, collection_name, output_dir="mongo_output", date=None):
         super().__init__(conn_str, database_name, collection_name, output_dir, date)
+        self.imsize = 224
 
     def _is_cdm_run_v3(self):
         """Check if collection is cdm_run_v3"""
@@ -577,11 +580,18 @@ class DrawingTaskExtractor(MongoExtractor):
                     
                     # Add trial data for each stroke
                     for i, _ in enumerate(Verts):
-                        out_path = f'{participant_session_dir}/{base_filename}_{i+1}.png'
+                        out_path = f'{participant_session_dir}/{base_filename}_{i+1}.png'     
+                        try:
+                            im = Image.open(out_path).resize((self.imsize, self.imsize))
+                            np_im = np.array(im)
+                            bbox = DrawingsExtractor.get_bounding_box(np_im)
+                        except Exception as e:
+                            logger.warning(f"Failed to compute bbox for {out_path}: {e}")
+                            bbox = (0, 0, 0, 0)
                         trials.append(StrokeData(session_id, participant_id, trial_num, 
                                             category, i+1, out_path, 
                                             category_stroke_recs[i].get(self._get_stroke_timing_field('start'), 0.0), 
-                                            category_stroke_recs[i].get(self._get_stroke_timing_field('end'), 0.0), age))
+                                            category_stroke_recs[i].get(self._get_stroke_timing_field('end'), 0.0), bbox, age))
                 elif save_type == "gif":
                     # Create GIF animation
                     base_filename = f"{self._formatted_filename('stroke', category_name, participant_id, session_id, age)}.gif"
