@@ -18,5 +18,7 @@ src/vislearnlabpy/embeddings/utils.py
 src/vislearnlabpy/extractions/drawingtask_extractor.py
 src/vislearnlabpy/extractions/mongo_extractor.py
 src/vislearnlabpy/models/clip_model.py
+src/vislearnlabpy/models/dinov3_model.py
 src/vislearnlabpy/models/feature_generator.py
 src/vislearnlabpy/models/multimodal_model.py
+src/vislearnlabpy/models/vision_model.py
