@@ -28,6 +28,7 @@ class ImgExtractionSettings:
     stroke_color: tuple = (0, 0, 0)
     stroke_threshold: int = 200
     bg_threshold: int = 200  # threshold to consider a pixel as background (0-255)
+    content_crop_padding: int = 10 # extra pixel padding to add to content crops
     bg_component_size: int = 10  # minimum size of connected components to keep (in pixels)
     filter_edge_artifacts: bool = False  # whether to filter out edge artifacts during cropping
     normalize_stroke_thickness: bool = False
@@ -139,30 +140,41 @@ class ImageExtractor:
         return large_components
 
     @staticmethod
-    def crop_to_content(img, apply_content_crop, stroke_threshold=200, min_component_size=10, filter_edge_artifacts=False):
+    def crop_to_content(img, apply_content_crop, bg_threshold=200, min_component_size=10, filter_edge_artifacts=False, padding=10):
         """Crop image to remove white space around content, ignoring small artifacts."""
         if not apply_content_crop:
             return img
-            
+        
         arr = np.asarray(img)
         img_width, img_height = img.size
+        
         # Create binary mask of non-white pixels
-        mask = np.all(arr < stroke_threshold, axis=2) if arr.ndim == 3 else arr < stroke_threshold
+        if arr.ndim == 3:
+            rgb_arr = arr[..., :3]  # Ignore alpha
+            mask = np.mean(rgb_arr, axis=2) < bg_threshold
+        else:
+            mask = arr < bg_threshold
         
         # Label connected components
-        labeled, num_features = ndimage.label(mask)
-        
+        labeled, num_features = ndimage.label(mask)        
         # Find component sizes
-        component_sizes = np.bincount(labeled.ravel())
+        component_sizes = np.bincount(labeled.ravel())        
         # Component 0 is background, so start from 1
-        large_components = component_sizes >= min_component_size
-        large_components[0] = False  # Don't include background
+        large_components = component_sizes >= min_component_size        
+        large_components[0] = False  # Don't include background        
         # Filter out edge artifacts (components that span entire width or height)
         if filter_edge_artifacts:
-            large_components = ImageExtractor._filter_edge_artifacts(large_components, labeled, component_sizes, img_width, img_height)
-
+            large_components = ImageExtractor._filter_edge_artifacts(
+                large_components, labeled, component_sizes, img_width, img_height
+            )        
         # Create cleaned mask with only large components
         cleaned_mask = large_components[labeled]
+        
+        if np.sum(cleaned_mask) == 0:
+            print("WARNING: No pixels in cleaned mask! Returning original image.")
+            return img
+        
+        # Create white background image
         if arr.ndim == 3:
             white_img = np.ones_like(arr) * 255
         else:
@@ -170,25 +182,38 @@ class ImageExtractor:
         
         # Copy only the content pixels (keep background white)
         white_img[cleaned_mask] = arr[cleaned_mask]
-        img = Image.fromarray(white_img.astype(np.uint8)) 
+        img = Image.fromarray(white_img.astype(np.uint8))
+        
         try:
             rows, cols = np.where(cleaned_mask)
+            
+            if len(rows) == 0 or len(cols) == 0:
+                print("ERROR: No content pixels found after filtering! Returning original image.")
+                return img
+            
             ylb = min(rows)  # top bound
             yub = max(rows)  # bottom bound
             xlb = min(cols)  # left bound
             xub = max(cols)  # right bound
-            width = xub - xlb  
-            height = yub - ylb  
-            max_dim = max(width, height) 
-
-            x_center = (xlb + xub) // 2 
-            y_center = (ylb + yub) // 2  
-
+                        
+            # Add padding to bounds
+            ylb = max(0, ylb - padding)
+            yub = min(img.size[1], yub + padding)
+            xlb = max(0, xlb - padding)
+            xub = min(img.size[0], xub + padding)
+                        
+            width = xub - xlb
+            height = yub - ylb
+            max_dim = max(width, height)
+                        
+            x_center = (xlb + xub) // 2
+            y_center = (ylb + yub) // 2
+            
             lb_x = x_center - max_dim // 2
             ub_x = x_center + max_dim // 2
             lb_y = y_center - max_dim // 2
             ub_y = y_center + max_dim // 2
-
+                        
             # Shift if out of bounds (to maintain square)
             if lb_x < 0:
                 ub_x -= lb_x
@@ -201,11 +226,16 @@ class ImageExtractor:
                 ub_x = img.size[0]
             if ub_y > img.size[1]:
                 lb_y -= (ub_y - img.size[1])
-                ub_y = img.size[1]
-
+                ub_y = img.size[1]        
             img = img.crop((lb_x, lb_y, ub_x, ub_y))
-        except ValueError:
-            print('Blank image - skipping crop')
+            
+        except ValueError as e:
+            print(f'ValueError during cropping: {e}')
+            print('Returning original image')
+        except Exception as e:
+            print(f'Unexpected error during cropping: {type(e).__name__}: {e}')
+            print('Returning original image')
+        
         return img
     
     @staticmethod
@@ -237,8 +267,9 @@ class ImageExtractor:
                     settings.stroke_color, 
                     settings.stroke_threshold
                 )
+                img_rgb = ImageExtractor.RGBA2RGB(img_rgb)
             # Step 4: Crop to content (remove whitespace) if enabled
-            img_cropped = ImageExtractor.crop_to_content(img_rgb, settings.apply_content_crop, settings.bg_threshold, settings.bg_component_size, settings.filter_edge_artifacts)
+            img_cropped = ImageExtractor.crop_to_content(img_rgb, settings.apply_content_crop, settings.bg_threshold, settings.bg_component_size, settings.filter_edge_artifacts, settings.content_crop_padding)
             return img_cropped
         
         # Build transformation pipeline

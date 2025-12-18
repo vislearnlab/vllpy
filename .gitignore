@@ -1,6 +1,7 @@
 build
 dist
 misc
+**/.DS_Store
 **/__pycache__/
 **.env
 examples/drawings/*
