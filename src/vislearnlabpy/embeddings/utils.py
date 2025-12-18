@@ -18,7 +18,7 @@ def rename_csv_column(file, cols, new_name):
 def process_csv(input_csv):
     images_df = pd.read_csv(input_csv)
     text_cols = ['class_name', 'word', 'text']
-    image_cols = ['input_path', 'image_path']
+    image_cols = ['input_path', 'image_path', 'cropped_image_path']
     if 'text1' not in images_df.columns:
         images_df = rename_csv_column(images_df, text_cols, 'text1')
     if 'image1' not in images_df.columns:

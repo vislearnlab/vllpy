@@ -37,6 +37,7 @@ class MultimodalModel(FeatureGenerator):
         preprocessed_images = [image.squeeze(0) if image.dim() == 4 else image for image in preprocessed_images]
         # Stack into a single tensor batch (assuming tensors are returned)
         image_batch = torch.stack(preprocessed_images).to(self.device)
+        print(f"Processing {len(images)} images as a batch of size {image_batch.size()}")
         with torch.no_grad():
             embeddings = self.encode_image(image_batch)  # model handles batch
         if normalize_embeddings:

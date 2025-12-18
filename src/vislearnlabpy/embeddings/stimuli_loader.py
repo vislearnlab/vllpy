@@ -313,10 +313,13 @@ class StimuliDataset(Dataset):
                         if self.transform is not None:
                             img_copy = self.transform(img_copy)
                         else:
-                            img_copy = img_copy.convert('RGB')
+                            img_extraction_settings = ImgExtractionSettings()
+                            img_extraction_settings.apply_content_crop = False
+                            transforms = ImageExtractor.get_transformations(img_extraction_settings)
+                            img_copy = transforms(img_copy)
                     except Exception as e:
                         print(f"Warning: failed to process image {idx} ({e}); skipping transform.")
-                        img_copy = img_copy.convert('RGB')
+                        img_copy = transforms.ToTensor()(img_copy.convert('RGB'))
                 full_image_paths.append(image_path)
                 images.append(img_copy)
 
@@ -344,18 +347,18 @@ class StimuliLoader():
                  stimuli_type='lookit', pairwise=False, transform=None):
         self.id_column = id_column
         self.transform = transform
-        
         if dataset_file is None:
             # If only an image directory is provided
             if image_folder is not None:
-                image_files = [
-                    f for f in os.listdir(image_folder)
-                    if (
-                    os.path.isfile(os.path.join(image_folder, f)) and
-                    not f.startswith("._") and
-                    f.lower().endswith((".png", ".jpg", ".jpeg"))
-                    )
-                ]
+                image_files = []
+                for file in os.listdir(image_folder):
+                    if self._is_image_file(file):
+                        image_files.append(os.path.join(image_folder, file))
+                for dirpath, _, filenames in os.walk(image_folder):
+                    for fname in filenames:
+                        if self._is_image_file(fname):
+                            image_files.append(os.path.join(dirpath, fname))
+                print(f"Found {len(image_files)} images in {image_folder}")
                 self.manifest = pd.DataFrame({'image1': image_files})
                 # assuming that the image path is a unique identifier if a specific ID column is not provided
                 self.id_column = "image1" if id_column is None else id_column
@@ -368,6 +371,10 @@ class StimuliLoader():
         self.image_folder = image_folder
         self.batch_size = batch_size
         self.pairwise = pairwise
+    
+    @staticmethod
+    def _is_image_file(file, exts={'.jpg', '.jpeg', '.png'}):
+        return os.path.splitext(file)[1].lower() in exts and not file.startswith("._")
     
     def collator(self, batch):
         return {key: [item for ex in batch for item in ex[key]] for key in batch[0]}

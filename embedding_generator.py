@@ -1,6 +1,6 @@
 import argparse
 import torch 
-from vislearnlabpy.embeddings.generate_embeddings import EmbeddingGenerator
+from vislearnlabpy.embeddings.generate_embeddings import generate_image_embeddings, EmbeddingGenerator
 
 def main():
     parser = argparse.ArgumentParser(description="Generate embeddings from models")
@@ -10,6 +10,7 @@ def main():
     parser.add_argument("--output_type", type=str, default="csv", help="Embedding format (npy, doc or csv)")
     parser.add_argument("--device", type=str, required=False, help="Device to run embedding generation on")
     parser.add_argument("--batch_size", type=int, default=1000, help="Batch size to save embeddings")
+    parser.add_argument("--id_column", type=str, default="image1", help="Image id column in csv")
     parser.add_argument(
         "--overwrite",
         action='store_true',
@@ -29,9 +30,9 @@ def main():
         input_device = args.device
     if args.input_csv is None and args.input_dir is None:
         args.input_dir = "examples/input"
-    embeddingGenerator = EmbeddingGenerator(device=input_device, output_type=args.output_type)
-    embeddingGenerator.generate_image_embeddings(args.output_path, args.overwrite, args.input_csv, args.input_dir,
-                                                 args.batch_size)
-    
+    generate_image_embeddings(args.input_dir, args.input_csv, args.output_path, args.overwrite,
+                                args.batch_size, id_column=args.id_column, subdirs=True,
+                                input_device=input_device, output_type=args.output_type)
+
 if __name__ == "__main__":
     main()
