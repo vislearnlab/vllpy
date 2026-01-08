@@ -66,7 +66,8 @@ def render_and_save(Verts,
                     Codes,
                     stroke_settings: StrokeSettings = StrokeSettings(),
                     save_dir=os.getcwd(),
-                    base_filename='strokes'):
+                    base_filename='strokes',
+                    last_stroke_only=False):
     '''
     input:
         line_width: how wide of strokes do we want? (int)
@@ -77,9 +78,11 @@ def render_and_save(Verts,
         rendered sketches into nested directories
 
     '''
-    verts = Verts[0]
-    codes = Codes[0]
     for i, verts in enumerate(Verts):
+        # Skip all but the last iteration if last_stroke_only is True
+        if last_stroke_only and i != len(Verts) - 1:
+            continue
+            
         codes = Codes[i]
         fig = plt.figure(figsize=(stroke_settings.imsize, stroke_settings.imsize), frameon=False)
         ax = plt.subplot(111)
@@ -95,21 +98,40 @@ def render_and_save(Verts,
                             hspace=0, wspace=0)
 
         ### render sketch so far
-        if len(verts) > 0:
-            path = Path(verts, codes)
-            patch = patches.PathPatch(path, facecolor='none', edgecolor=stroke_settings.edgecolor, lw=stroke_settings.line_width)
-            ax.add_patch(patch)
-            plt.gca().invert_yaxis()  # y values increase as you go down in image
+        if last_stroke_only:
+            # Render all strokes for the final image
+            for stroke_idx in range(len(Verts)):
+                stroke_verts = Verts[stroke_idx]
+                stroke_codes = Codes[stroke_idx]
+                if len(stroke_verts) > 0:
+                    path = Path(stroke_verts, stroke_codes)
+                    patch = patches.PathPatch(path, facecolor='none', 
+                                            edgecolor=stroke_settings.edgecolor, 
+                                            lw=stroke_settings.line_width)
+                    ax.add_patch(patch)
+        else:
+            # Render only current stroke
+            if len(verts) > 0:
+                path = Path(verts, codes)
+                patch = patches.PathPatch(path, facecolor='none', 
+                                        edgecolor=stroke_settings.edgecolor, 
+                                        lw=stroke_settings.line_width)
+                ax.add_patch(patch)
+        
+        plt.gca().invert_yaxis()  # y values increase as you go down in image
 
         ## save out as png
-        ## maybe to make it not render every single thing, use plt.ioff
         os.makedirs(save_dir, exist_ok=True)
-        # saving stroke count and not index so i+1
-        fname = '{}_{}.png'.format(base_filename, i+1)
+        if not last_stroke_only:
+            # saving stroke count and not index so i+1
+            fname = f'{base_filename}_{i+1}.png'
+        else:
+            # not including stroke count in the name since we're only saving the final stroke
+            fname = f'{base_filename}.png'
+            
         filepath = os.path.join(save_dir, fname)
         fig.savefig(filepath, bbox_inches='tight', pad_inches=0.0)
         plt.close(fig)
-
 
 def polyline_pathmaker(lines):
     x = []

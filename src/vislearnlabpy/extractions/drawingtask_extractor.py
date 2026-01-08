@@ -3,7 +3,7 @@ from io import StringIO
 import logging
 
 from typing import Optional, Tuple
-from vislearnlabpy.embeddings.stimuli_loader import ImageExtractor
+from vislearnlabpy.embeddings.stimuli_loader import ImageExtractor, ImgExtractionSettings
 import io
 import base64
 from PIL import Image
@@ -75,14 +75,15 @@ class StrokeData:
 
 class DrawingsExtractor():
     @staticmethod
-    def get_default_transformation():
-        return ImageExtractor.get_transformations(apply_center_crop=False, apply_content_crop=True, use_thumbnail=True)
+    def get_default_transformation_settings():
+        default_settings = ImgExtractionSettings()
+        return default_settings
 
     @staticmethod
-    def save_transformed(imgData, fname, transform=None):
-        if transform is None:
-            transform = DrawingsExtractor.get_default_transformation()
-        
+    def save_transformed(imgData, fname, transform_settings=None):
+        if transform_settings is None:
+            transform_settings = DrawingsExtractor.get_default_transformation_settings()
+        transform = ImageExtractor.get_transformations(transform_settings)
         img_bytes = base64.b64decode(imgData)
         img = Image.open(io.BytesIO(img_bytes))
         img = transform(img)
@@ -96,6 +97,15 @@ class DrawingsExtractor():
         im = Image.open(fname).resize((imsize, imsize))
         _im = np.array(im)
         return _im
+    
+    @staticmethod
+    def save_transformed_file(fname, transform_settings=None):
+        if transform_settings is None:
+            transform_settings = DrawingsExtractor.get_default_transformation()
+        transform = ImageExtractor.get_transformations(transform_settings)  
+        img = Image.open(fname)
+        img = transform(img)
+        img.save(fname)
     
     @staticmethod
     def get_mean_intensity(img, imsize):
@@ -277,6 +287,7 @@ class DrawingTaskExtractor(MongoExtractor):
         return this_intensity, this_bounding_box
 
     def _output_filename(self, filename_prefix, run_name):
+        # todo: add more filename customization
         return os.path.join(self.output_dir, f"{filename_prefix}_final_{run_name}.csv")
     
     def _save_dataframe(self, data_dict, filename_prefix, run_name):
@@ -344,7 +355,7 @@ class DrawingTaskExtractor(MongoExtractor):
         age_part, participant_part = self._age_participant_parts(age, participant_id, session_id)
         return f"{category}_{extraction_type}_{age_part}{participant_part}{session_id}"
 
-    def extract_images(self, image_dir=None, imsize=224, transform_file=False):
+    def extract_images(self, image_dir=None, imsize=224, transform_file=False, highres=False, stroke_settings=StrokeSettings(), transform_settings=None, **filters):
         if image_dir is None:
             image_dir = os.path.join(self.output_dir, 'sketches_full_dataset')
         # Initialize tracking variables
@@ -355,9 +366,20 @@ class DrawingTaskExtractor(MongoExtractor):
         # Initialize data storage
         trials = []
         query = {'dataType': 'finalImage'}
+        query.update({
+            save_format_to_field_map.get(key, key): {'$in': values}
+            for key, values in filters.items()
+            if values  # only include if values is non-empty
+        })
         # Get all sessions
-        sessions_to_render = list(self.collection.find(self._add_date_query(query)).distinct('sessionId'))
-        sessions_to_render = self._render_unprocessed_sessions('AllDescriptives_images', sessions_to_render)
+        sessions_to_render_with_cats = list(set([
+            (doc['sessionId'], doc['category'])
+            for doc in self.collection.find(self._add_date_query(query), {'sessionId': 1, 'category': 1})
+            if 'category' in doc
+        ]))
+        # unprocessed sessions with categoriess to account for previous saves that don't include all categories
+        sessions_to_render = self._render_unprocessed_sessions_with_cats(f'AllDescriptives_images',
+                                                                  sessions_to_render_with_cats)
 
         time_start = time.time()
 
@@ -381,6 +403,8 @@ class DrawingTaskExtractor(MongoExtractor):
             if len(image_recs) > 3:
                 for imrec in image_recs:
                     if 'category' not in imrec or imrec['category'] is None:
+                        continue
+                    if 'category' in filters and imrec['category'] not in filters['category']:
                         continue
                     participant_id_col = self._participant_id_col(imrec)
                     if participant_id_col is None:
@@ -418,13 +442,30 @@ class DrawingTaskExtractor(MongoExtractor):
                                 draw_duration, intensity, bounding_box, imrec.get('age', None)
                             )
                         )
-                        
-                        # Save image files
-                        if transform_file:
-                            DrawingsExtractor.save_transformed(imrec['imgData'], fname)
+                        if highres:
+                            # Use the existing SVG helper functions
+                            svg_list = make_svg_list(stroke_recs)
+                            # Get verts and codes
+                            Verts, Codes = get_verts_and_codes(svg_list)
+                            # Render and save as PNGs
+                            render_and_save(Verts,
+                                        Codes,
+                                        save_dir=category_dir,
+                                        base_filename=base_filename,
+                                        stroke_settings=stroke_settings,
+                                        last_stroke_only=True)
+                            if transform_file:
+                                if transform_settings is None:
+                                    transform_settings = ImgExtractionSettings(resize_dim=768)
+                                DrawingsExtractor.save_transformed_file(fname, transform_settings)
+
                         else:
-                            with open(fname, "wb") as fh:
-                                fh.write(base64.b64decode(imrec['imgData']))
+                            # Save image files
+                            if transform_file:
+                                DrawingsExtractor.save_transformed(imrec['imgData'], fname, transform_settings)
+                            else:
+                                with open(fname, "wb") as fh:
+                                    fh.write(base64.b64decode(imrec['imgData']))
                         write_count += 1
                         if np.mod(write_count, 100) == 0:
                             time_spent = (time.time() - time_start) / 60
@@ -491,7 +532,7 @@ class DrawingTaskExtractor(MongoExtractor):
             self._save_dataframe(trials, 'AllDescriptives_audio', self.collection.name)
             trials = []
         print(f"Finished processing {write_count} audio files")
-
+        
     def extract_strokes(self, save_dir=None, save_type="png", stroke_settings=StrokeSettings(), **filters):
         """
         Extract stroke documents for all (or specified) sessions/trials.
