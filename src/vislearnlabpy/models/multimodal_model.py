@@ -28,31 +28,28 @@ class MultimodalModel(FeatureGenerator):
         return self.model.encode_text(text)
 
     def image_embeddings(self, images, normalize_embeddings=False):
-        """Get image embeddings (batched for speed)"""
-        # Handle single image case
+        """Get image embeddings. Returns (N, D) tensor. Caller must ensure no None images."""
         if not isinstance(images, list):
-            return self.image_embeddings([images], normalize_embeddings)[0]
-        # Preprocess all images → batch
-        preprocessed_images = [self.preprocess_image(image) for image in images]
-        preprocessed_images = [image.squeeze(0) if image.dim() == 4 else image for image in preprocessed_images]
-        # Stack into a single tensor batch (assuming tensors are returned)
-        image_batch = torch.stack(preprocessed_images).to(self.device)
-        print(f"Processing {len(images)} images as a batch of size {image_batch.size()}")
+            return self.image_embeddings([images], normalize_embeddings)
+        if not images:
+            return torch.empty(0)
+        preprocessed = [self.preprocess_image(img) for img in images]
+        preprocessed = [img.squeeze(0) if img.dim() == 4 else img for img in preprocessed]
+        image_batch = torch.stack(preprocessed).to(self.device)
         with torch.no_grad():
-            embeddings = self.encode_image(image_batch)  # model handles batch
+            embeddings = self.encode_image(image_batch)
         if normalize_embeddings:
             embeddings = utils.normalize_embeddings(embeddings)
         return embeddings
 
     def text_embeddings(self, words, normalize_embeddings=False):
-        """Get text embeddings"""
-        all_text_features = [self.preprocess_text(word) for word in words]
+        """Get text embeddings. Returns (N, D) tensor."""
+        tokens = torch.cat([self.preprocess_text(w) for w in words]).to(self.device)
         with torch.no_grad():
-            embeddings = [self.encode_text(text_features) for text_features in all_text_features]
+            embeddings = self.encode_text(tokens)
         if normalize_embeddings:
-            return utils.normalize_embeddings(embeddings)
-        else:
-            return embeddings
+            embeddings = utils.normalize_embeddings(embeddings)
+        return embeddings
 
     def multimodal_embeddings(self, image_embeddings, text_embeddings):
         """Get multimodal embeddings: by default, averages image and text embeddings"""

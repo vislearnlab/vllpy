@@ -13,7 +13,7 @@ import numpy as np
 from scipy import ndimage
 from skimage.morphology import skeletonize, binary_dilation, disk
 from skimage import img_as_bool
-
+from pathlib import Path
 random.seed(2)
 
 
@@ -315,12 +315,19 @@ class ImageExtractor:
 class StimuliDataset(Dataset):
     def __init__(self, manifest, images_folder=None, id_column=None, transform=None):
         self.manifest = manifest
-        self.images_folder = images_folder
+        self.images_folder = self._resolved_image_path(images_folder)
         self.num_text_cols = sum(1 for c in self.manifest.columns if re.compile("text[0-9]").match(c))
         self.num_image_cols = len([c for c in self.manifest.columns if re.compile("image[0-9]").match(c)])
         self.id_column = id_column
         self.transform = transform
 
+    def _resolved_image_path(self, images_folder):
+        if images_folder is not None:
+            images_folder = Path(images_folder)
+            if not images_folder.is_absolute():
+                images_folder = images_folder.resolve()
+        return images_folder
+    
     def __len__(self):
         return len(self.manifest)
 
@@ -382,13 +389,10 @@ class StimuliLoader():
             # If only an image directory is provided
             if image_folder is not None:
                 image_files = []
-                for file in os.listdir(image_folder):
-                    if self._is_image_file(file):
-                        image_files.append(os.path.join(image_folder, file))
                 for dirpath, _, filenames in os.walk(image_folder):
                     for fname in filenames:
                         if self._is_image_file(fname):
-                            image_files.append(os.path.join(dirpath, fname))
+                            image_files.append(os.path.abspath(os.path.join(dirpath, fname)))
                 print(f"Found {len(image_files)} images in {image_folder}")
                 self.manifest = pd.DataFrame({'image1': image_files})
                 # assuming that the image path is a unique identifier if a specific ID column is not provided

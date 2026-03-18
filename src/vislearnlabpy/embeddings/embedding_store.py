@@ -43,7 +43,7 @@ class EmbeddingStore():
     def embeddings(self):
         return self.EmbeddingList.embedding
 
-    def from_csv(csv_path): #"/ccn2/dataset/babyview/outputs_20250312/yoloe_cdi_10k_cropped_by_class_mask/embeddings/image_embeddings/clip_image_embeddings_npy.csv", CLIPImageEmbedding
+    def from_csv(csv_path):
         embedding_doc = DocList[CLIPImageEmbedding]()
         if not os.path.isabs(csv_path):
             csv_path = Path(os.getcwd()) / csv_path
@@ -106,7 +106,7 @@ class EmbeddingStore():
         self.EmbeddingList.extend(temp_list)
     
     def search_store(self, text_query, limit=10, categories=None):
-        query = self.FeatureGenerator.text_embeddings([text_query], normalize_embeddings=True)[0][0].cpu().numpy()
+        query = self.FeatureGenerator.text_embeddings([text_query], normalize_embeddings=True)[0].cpu().numpy()
         doc_index = InMemoryExactNNIndex[CLIPImageEmbedding]()
         if categories is not None:
             filter_query = {

@@ -16,13 +16,17 @@ def rename_csv_column(file, cols, new_name):
     return file
 
 def process_csv(input_csv):
-    images_df = pd.read_csv(input_csv)
-    text_cols = ['class_name', 'word', 'text']
-    image_cols = ['input_path', 'image_path', 'cropped_image_path']
-    if 'text1' not in images_df.columns:
-        images_df = rename_csv_column(images_df, text_cols, 'text1')
-    if 'image1' not in images_df.columns:
-        images_df = rename_csv_column(images_df, image_cols, 'image1')
+    # if user directly passes in dataframe, use it.
+    if isinstance(input_csv, pd.DataFrame):
+        images_df = input_csv
+    else:
+        images_df = pd.read_csv(input_csv)
+        text_cols = ['class_name', 'word', 'text']
+        image_cols = ['input_path', 'image_path', 'cropped_image_path']
+        if 'text1' not in images_df.columns:
+            images_df = rename_csv_column(images_df, text_cols, 'text1')
+        if 'image1' not in images_df.columns:
+            images_df = rename_csv_column(images_df, image_cols, 'image1')
     return images_df
 
 def indexed_embeddings(embedding):
