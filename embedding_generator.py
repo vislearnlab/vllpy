@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import asdict
 import torch
 from vislearnlabpy.embeddings.generate_embeddings import EmbeddingConfig, EmbeddingGenerator
 
@@ -16,19 +17,20 @@ def main():
     parser.add_argument("--overwrite", action="store_true", default=False, help="Overwrite existing data")
     parser.add_argument("--normalize", action="store_true", default=False, help="Normalize embeddings")
     parser.add_argument("--subdirs", action="store_true", default=False, help="Preserve subdirectory structure")
+    parser.add_argument("--model_name", type=str, default="clip", help="Model type to use for embeddings (e.g. clip, dinov3)")
     args = parser.parse_args()
 
     if args.input_csv is None and args.input_dir is None:
         args.input_dir = "examples/input"
 
     config = EmbeddingConfig(
-        model_type="clip",
         output_type=args.output_type,
         device=args.device,
         text_prompt=args.text_prompt,
         normalize_embeddings=args.normalize,
     )
-    generator = EmbeddingGenerator(config)
+    generator = EmbeddingGenerator.from_model(args.model_name, **asdict(config))
+
     generator.generate_image_embeddings(
         input_dir=args.input_dir,
         input_csv=args.input_csv,

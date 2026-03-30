@@ -23,7 +23,7 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 Here is as an example of how to generate a CSV file with embeddings from a list of images in a directory. You can also use this to generate npy files and doc files by changing the output type in the command below, and generate the embeddings from a CSV file instead by using `input_file` instead of `input_dir`
 ``` 
-python embedding_generator.py --input_dir examples/input --output_path examples/output --output_type csv --overwrite
+python embedding_generator.py --input_dir examples/input --output_path examples/output --output_type csv --overwrite --model_name clip
 ```
 
 For more detailed examples, please look at the demo in the Jupyter notebooks within the `examples` folder.
