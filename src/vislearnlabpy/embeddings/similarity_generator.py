@@ -77,13 +77,12 @@ class SimilarityGenerator():
         df = embeddings.to_dataframe()
         # Process all combinations of embeddings and texts
         similarities = []
-        key = SimilarityGenerator._sim_key(df)
-        existing_texts = df[key].values
+        existing_texts = df["text"].values
         for (text1, text2) in text_pairs:
             if text1 in existing_texts and text2 in existing_texts:
                 # Get text embeddings if available
-                text1_embedding = df[df[key] == text1]["embedding"].iloc[0]
-                text2_embedding = df[df[key] == text2]["embedding"].iloc[0]
+                text1_embedding = df[df["text"] == text1]["embedding"].iloc[0]
+                text2_embedding = df[df["text"] == text2]["embedding"].iloc[0]
                 entry = {}
                 if self.similarity_type == "cosine":
                     entry[f"{self.similarity_type}_similarity"] = cosine_sim(text1_embedding, text2_embedding)

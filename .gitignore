@@ -5,7 +5,9 @@ misc
 **/__pycache__/
 **.env
 examples/drawings/*
-examples/**embeddings
+examples/**/output/
 # Unignore only *.ipynb files and auth file inside examples/drawings/
 !examples/drawings/*.ipynb
 !examples/drawings/auth_template.txt
+
+.vscode/

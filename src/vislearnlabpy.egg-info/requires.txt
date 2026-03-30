@@ -10,3 +10,4 @@ pymongo>=4.13.2
 python-dotenv>=1.1.1
 svgpathtools>=1.7.1
 scikit-image>=0.25.2
+transformers>=5.4.0

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace as dataclass_replace
+import math
 from typing import Any, Iterable, Optional
 from vislearnlabpy.models.clip_model import CLIPGenerator
 from vislearnlabpy.models.hf_model import HuggingFaceVisionGenerator, HuggingFaceCLIPGenerator, MODEL_PRESETS
@@ -362,7 +363,7 @@ class EmbeddingGenerator:
                 self._generate_sequential(output_path=output_path, subdirs=subdirs, overwrite=overwrite)
             max_actors_per_gpu= int(1 / self.config.gpu_per_actor + 0.1) if self.config.gpu_per_actor > 0 else 2
             actor_count = min(self.config.num_actors or num_gpus * 2, num_gpus * max_actors_per_gpu) 
-            chunk_size = max(1, total // actor_count)
+            chunk_size = math.ceil(total / actor_count)
             chunks = [list(range(i, min(i + chunk_size, total))) for i in range(0, total, chunk_size)]
             print(f"Spawning {len(chunks)} Ray actors for {total} images (chunk size={chunk_size})")
 

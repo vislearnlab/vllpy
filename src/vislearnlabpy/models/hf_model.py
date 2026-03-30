@@ -12,7 +12,7 @@ MODEL_PRESETS = {
     "clip-hf":           {"model_source": "huggingface_clip","model_name": "openai/clip-vit-base-patch32",             "model_type": "clip"},
     "clip-hf-large":     {"model_source": "huggingface_clip","model_name": "openai/clip-vit-large-patch14",            "model_type": "clip-large"},
     # Vision-only HuggingFace models
-    "dinov3-big":            {"model_source": "huggingface",     "model_name": "facebook/dinov3-vitb16-pretrain-lvd1689m", "model_type": "dinov3"},
+    "dinov3-big":            {"model_source": "huggingface",     "model_name": "facebook/dinov3-vitb16-pretrain-lvd1689m", "model_type": "dinov3-vitb16"},
     "dinov3":      {"model_source": "huggingface",     "model_name": "facebook/dinov3-vitl16-pretrain-lvd1689m", "model_type": "dinov3-vitl16"},
     "dinov3-babyview":   {"model_source": "huggingface",     "model_name": "awwkl/dinov3-vitl-babyview",              "model_type": "dinov3-bv"},
     "dinov3-laion":      {"model_source": "huggingface",     "model_name": "facebook/dinov3-vits16-pretrain-lvd1689m", "model_type": "dinov3-laion"},

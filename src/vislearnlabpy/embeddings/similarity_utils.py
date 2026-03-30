@@ -80,7 +80,7 @@ def compute_rdm(X: Array, method: str) -> Array:
             rsm = cosine_matrix(X)
         elif method == "gaussian":
             rsm = gaussian_kernel(X)
-    return 1 - rsm
+    return np.round(1 - rsm, 5)
 
 def correlate_rdms(
     rdm_1: Array,

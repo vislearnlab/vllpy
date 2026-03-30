@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: vislearnlabpy
-Version: 0.0.3.4
+Version: 0.0.4.0
 Summary: Visual Learning Lab utility files and pipelines
 Author-email: Tarun Sepuri <tarunsepuri@gmail.com>
 License-Expression: MIT
@@ -23,6 +23,7 @@ Requires-Dist: pymongo>=4.13.2
 Requires-Dist: python-dotenv>=1.1.1
 Requires-Dist: svgpathtools>=1.7.1
 Requires-Dist: scikit-image>=0.25.2
+Requires-Dist: transformers>=5.4.0
 Dynamic: license-file
 
 # vllpy
@@ -50,7 +51,7 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 Here is as an example of how to generate a CSV file with embeddings from a list of images in a directory. You can also use this to generate npy files and doc files by changing the output type in the command below, and generate the embeddings from a CSV file instead by using `input_file` instead of `input_dir`
 ``` 
-python embedding_generator.py --input_dir examples/input --output_path examples/output --output_type csv --overwrite
+python embedding_generator.py --input_dir examples/input --output_path examples/output --output_type csv --overwrite --model_name clip
 ```
 
 For more detailed examples, please look at the demo in the Jupyter notebooks within the `examples` folder.
