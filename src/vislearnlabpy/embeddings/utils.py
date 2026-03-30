@@ -8,6 +8,9 @@ import torch
 from tqdm import tqdm
 from pathlib import Path
 
+def is_url(path):
+    return isinstance(path, str) and path.startswith(("http://", "https://"))
+
 def rename_csv_column(file, cols, new_name):
     for col in cols:
         if col in file.columns:

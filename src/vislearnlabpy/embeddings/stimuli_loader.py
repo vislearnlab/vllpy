@@ -4,7 +4,7 @@ import pandas as pd
 import re
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-from vislearnlabpy.embeddings.utils import process_csv
+from vislearnlabpy.embeddings.utils import process_csv, is_url
 import random
 from typing import Callable, Any
 import warnings
@@ -339,25 +339,33 @@ class StimuliDataset(Dataset):
         full_image_paths = []
         
         for image_path in image_paths:
-            if not os.path.isabs(image_path):
+            is_url_path = is_url(image_path)
+            if not is_url_path and not os.path.isabs(image_path):
                 image_path = os.path.join(os.getcwd(), image_path)
-            if image_path is None or not os.path.exists(image_path):
+            if image_path is None or (not is_url_path and not os.path.exists(image_path)):
                 full_image_paths.append(None)
                 images.append(None)
             else:
-                with Image.open(image_path) as img:
-                    img_copy = img.copy()  # Copy the image data to memory
-                    try:
-                        if self.transform is not None:
-                            img_copy = self.transform(img_copy)
-                        else:
-                            img_extraction_settings = ImgExtractionSettings()
-                            img_extraction_settings.apply_content_crop = False
-                            transforms = ImageExtractor.get_transformations(img_extraction_settings)
-                            img_copy = transforms(img_copy)
-                    except Exception as e:
-                        print(f"Warning: failed to process image {idx} ({e}); skipping transform.")
-                        img_copy = transforms.ToTensor()(img_copy.convert('RGB'))
+                if is_url_path:
+                    import urllib.request, io
+                    with urllib.request.urlopen(image_path) as response:
+                        img_bytes = response.read()
+                    img = Image.open(io.BytesIO(img_bytes))
+                    img.load()
+                else:
+                    img = Image.open(image_path)
+                img_copy = img.copy()  # Copy the image data to memory
+                try:
+                    if self.transform is not None:
+                        img_copy = self.transform(img_copy)
+                    else:
+                        img_extraction_settings = ImgExtractionSettings()
+                        img_extraction_settings.apply_content_crop = False
+                        transforms = ImageExtractor.get_transformations(img_extraction_settings)
+                        img_copy = transforms(img_copy)
+                except Exception as e:
+                    print(f"Warning: failed to process image {idx} ({e}); skipping transform.")
+                    img_copy = transforms.ToTensor()(img_copy.convert('RGB'))
                 full_image_paths.append(image_path)
                 images.append(img_copy)
 

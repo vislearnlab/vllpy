@@ -6,7 +6,13 @@ import torch
 
 class MultimodalModel(FeatureGenerator):
     """Abstract base class for multimodal models like CLIP and CVCL that extends FeatureGenerator"""
+    supports_text: bool = True
     
+    @property
+    def embedding_dim(self) -> int:
+        # openai/clip models expose output_dim on the visual tower
+        return int(self.model.visual.output_dim)
+
     def __init__(self, model, preprocess, dataloader=None, device=None):
         super().__init__(model, preprocess, dataloader, device)
         self.image_word_alignment = lambda **x: self.model(**x).logits_per_image.softmax(dim=-1).detach().cpu().numpy()
@@ -55,12 +61,19 @@ class MultimodalModel(FeatureGenerator):
         """Get multimodal embeddings: by default, averages image and text embeddings"""
         return [(a + b) / 2 for a, b in zip(image_embeddings, text_embeddings)]
     
-    def text_to_images_logits(self, image_embeddings, text_embeddings, logit_scale=100):
+    def _resolve_logit_scale(self, logit_scale=None):
+        if logit_scale is not None:
+            return logit_scale
+        if hasattr(self.model, "logit_scale"):
+            return self.model.logit_scale.exp().item()
+        return 100
+
+    def text_to_images_logits(self, image_embeddings, text_embeddings, logit_scale=None):
         """Get logits of text to image embedding dot products"""
-        return logit_scale * image_embeddings @ text_embeddings.t()
-    
-    def text_to_images_similarity(self, image_embeddings, text_embedding, logit_scale=100):
-        # Convert image_embeddings list to tensor if needed
+        scale = self._resolve_logit_scale(logit_scale)
+        return scale * image_embeddings @ text_embeddings.t()
+
+    def text_to_images_similarity(self, image_embeddings, text_embedding, logit_scale=None):
         if isinstance(image_embeddings, list):
             image_embeddings = torch.stack(image_embeddings)
         logits = self.text_to_images_logits(image_embeddings, text_embedding, logit_scale).to(self.device)
@@ -85,7 +98,7 @@ class MultimodalModel(FeatureGenerator):
                 'image_similarity': self.similarity(curr_image_embeddings[0], curr_image_embeddings[1]),
                 'text_similarity': self.similarity(curr_text_embeddings[0], curr_text_embeddings[1]),
                 # finding distractor image to target word similarity
-                'multimodal_similarity': self.text_to_images_similarity(curr_image_embeddings, curr_text_embeddings[0], logit_scale=10),
+                'multimodal_similarity': self.text_to_images_similarity(curr_image_embeddings, curr_text_embeddings[0]),
             })
         if similarity_scores == []:
             print(f"skipping {word1} and {word2} since they do not have valid images")

@@ -11,6 +11,13 @@ random.seed(4)
 
 class FeatureGenerator(ABC):
     """Abstract base class for generating similarity scores between pairs of concepts."""
+    supports_text: bool = False  # subclasses that support text embeddings should set True
+
+    @property
+    def embedding_dim(self) -> int:
+        """Dimensionality of the embeddings produced by this model. Override in subclasses."""
+        return 512
+
     def __init__(self, model, preprocess, dataloader, device=None, name="feature_generator"):
         # working with tversky CPU capacity
         torch.set_num_threads(64)

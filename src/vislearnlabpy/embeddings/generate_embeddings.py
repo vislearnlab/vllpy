@@ -1,9 +1,10 @@
 from dataclasses import dataclass, replace as dataclass_replace
 from typing import Any, Iterable, Optional
 from vislearnlabpy.models.clip_model import CLIPGenerator
+from vislearnlabpy.models.hf_model import HuggingFaceVisionGenerator, HuggingFaceCLIPGenerator, MODEL_PRESETS
 from vislearnlabpy.embeddings.stimuli_loader import StimuliLoader
-from vislearnlabpy.embeddings.utils import save_df, indexed_embeddings
-from vislearnlabpy.embeddings.embedding_store import CLIPImageEmbedding, CLIPTextEmbedding, EmbeddingStore
+from vislearnlabpy.embeddings.utils import save_df, indexed_embeddings, is_url
+from vislearnlabpy.embeddings.embedding_store import EmbeddingStore
 import torch
 import os
 import itertools
@@ -16,16 +17,25 @@ from tqdm import tqdm
 
 @dataclass
 class EmbeddingConfig:
-    """Configuration for EmbeddingGenerator (model and output settings)."""
-    model_type: str = "clip"
-    output_type: str = "csv"               # "csv", "npy", or "doc"
-    device: Optional[str] = None           # None → auto-detect CUDA/CPU
-    text_prompt: str = "a photo of a "     # prepended to every text label
+    """Configuration for EmbeddingGenerator (model and output settings).
+
+    model_source options:
+      "openai_clip"   – default, uses the openai/CLIP package (ViT-B/32 etc.)
+      "huggingface"   – any HuggingFace vision model via AutoModel
+                        (DINOv2, DINOv3, HF CLIP, …); set model_name to the HF repo id.
+    """
+    model_type: str = "clip"               # human-readable label used in output filenames
+    model_source: str = "openai_clip"      # "openai_clip" | "huggingface"
+    model_name: str = "ViT-B/32"          # variant for openai_clip, or HF repo id
+    hf_token: Optional[str] = None        # HuggingFace token for private/gated repos
+    output_type: str = "csv"              # "csv", "npy", or "doc"
+    device: Optional[str] = None          # None → auto-detect CUDA/CPU
+    text_prompt: str = "a photo of a "    # prepended to every text label (CLIP only)
     normalize_embeddings: bool = False
-    transform: Optional[Any] = None        # torchvision transform pipeline
-    num_actors: Optional[int] = None       # for parallel npy generation (Ray)
-    gpu_per_actor: float = 0.3             # for parallel npy generation (Ray)
-    save_every_batch=False                 # Whether to save results after every batch (instead of all at the end) in sequential mode. Useful for large datasets or if using a GPU with limited memory. Note: not compatible with output_type="doc" since doc store is only written at the end.
+    transform: Optional[Any] = None       # torchvision transform pipeline
+    num_actors: Optional[int] = None      # for parallel npy generation (Ray)
+    gpu_per_actor: float = 0.3            # for parallel npy generation (Ray)
+    save_every_batch: bool = False        # save after every batch instead of all at end
 
 try:
     import ray
@@ -41,24 +51,21 @@ try:
             self.id_column = id_column
             self.config = config
             self.device = config.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
-            self.model = CLIPGenerator(device=self.device, text_prompt=config.text_prompt)
+            if config.model_source == "huggingface":
+                self.model = HuggingFaceVisionGenerator(
+                    model_name=config.model_name, device=self.device, token=config.hf_token
+                )
+            elif config.model_source == "huggingface_clip":
+                self.model = HuggingFaceCLIPGenerator(
+                    model_name=config.model_name, text_prompt=config.text_prompt,
+                    device=self.device, token=config.hf_token
+                )
+            else:
+                self.model = CLIPGenerator(device=self.device, text_prompt=config.text_prompt)
             self.subdirs = subdirs
 
         def _save_embedding(self, embedding, curr_id, save_path, text=None):
-            if os.path.exists(curr_id):
-                sub_save_path = str(Path(curr_id).name)
-                if self.subdirs:
-                    sub_save_path = str(Path(curr_id).parent.name) + "/" + str(Path(curr_id).name)
-                elif text is not None:
-                    sub_save_path = f"{text}/{sub_save_path}"
-            else:
-                sub_save_path = curr_id
-            out_path = Path(f"{save_path}/{sub_save_path}").with_suffix(".npy")
-            if not str(save_path).startswith("/"):
-                out_path = Path(f"{os.getcwd()}/{out_path}")
-            os.makedirs(out_path.parent, exist_ok=True)
-            np.save(str(out_path), embedding)
-            return str(out_path)
+            return _save_embedding(embedding, curr_id, save_path, text=text, subdirs=self.subdirs)
 
         def process_chunk(self, indices, save_path, overwrite, batch_size, num_workers=4):
             loader_kwargs = dict(image_folder=self.input_dir, batch_size=batch_size,
@@ -105,6 +112,25 @@ except ImportError:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _save_embedding(embedding, curr_id, save_path, text=None, subdirs=False):
+    if is_url(curr_id):
+        sub = Path(curr_id.split("?")[0]).name
+    elif os.path.exists(curr_id):
+        sub = str(Path(curr_id).name)
+        if subdirs:
+            sub = str(Path(curr_id).parent.name) + "/" + str(Path(curr_id).name)
+        elif text is not None:
+            sub = f"{text}/{sub}"
+    else:
+        sub = curr_id
+    out_path = Path(f"{save_path}/{sub}").with_suffix(".npy")
+    if not str(save_path).startswith("/"):
+        out_path = Path(f"{os.getcwd()}/{out_path}")
+    os.makedirs(out_path.parent, exist_ok=True)
+    np.save(str(out_path), embedding)
+    return str(out_path)
+
+
 def _image_save_path(save_path, model_type):
     base = os.path.join(os.getcwd(), "output") if save_path is None else str(save_path)
     full = os.path.join(base, "image_embeddings")
@@ -133,7 +159,42 @@ class EmbeddingGenerator:
         self.normalize_embeddings = self.config.normalize_embeddings
         self.text_prompt = self.config.text_prompt
         # todo: additional config values are not being passed as direct instance variables
-        self.model = model or CLIPGenerator(device=self.device, text_prompt=self.config.text_prompt)
+        self.model = model or self._build_model()
+
+    @classmethod
+    def from_model(cls, name: str, **config_kwargs) -> "EmbeddingGenerator":
+        """Instantiate from a named preset, e.g. EmbeddingGenerator.from_model('dinov3-babyview').
+
+        Any extra keyword arguments override the preset's EmbeddingConfig fields.
+        Available presets: """ + ", ".join(f'"{k}"' for k in MODEL_PRESETS) + """
+        """
+        if name not in MODEL_PRESETS:
+            raise ValueError(f"Unknown model preset '{name}'. Available: {list(MODEL_PRESETS)}")
+        cfg = EmbeddingConfig(**{**MODEL_PRESETS[name], **config_kwargs})
+        return cls(config=cfg)
+
+    def _build_model(self, dataloader=None):
+        if self.config.model_source == "huggingface":
+            return HuggingFaceVisionGenerator(
+                model_name=self.config.model_name,
+                dataloader=dataloader,
+                device=self.device,
+                token=self.config.hf_token,
+            )
+        if self.config.model_source == "huggingface_clip":
+            return HuggingFaceCLIPGenerator(
+                model_name=self.config.model_name,
+                text_prompt=self.config.text_prompt,
+                dataloader=dataloader,
+                device=self.device,
+                token=self.config.hf_token,
+            )
+        # default: openai_clip
+        return CLIPGenerator(
+            device=self.device,
+            text_prompt=self.config.text_prompt,
+            dataloader=dataloader,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -156,20 +217,7 @@ class EmbeddingGenerator:
         return set(existing)
 
     def _save_embedding(self, embedding, curr_id, save_path, text=None, subdirs=False):
-        if os.path.exists(curr_id):
-            sub = str(Path(curr_id).name)
-            if subdirs:
-                sub = str(Path(curr_id).parent.name) + "/" + str(Path(curr_id).name)
-            elif text is not None:
-                sub = f"{text}/{sub}"
-        else:
-            sub = curr_id
-        out_path = Path(f"{save_path}/{sub}").with_suffix(".npy")
-        if not str(save_path).startswith("/"):
-            out_path = Path(f"{os.getcwd()}/{out_path}")
-        os.makedirs(out_path.parent, exist_ok=True)
-        np.save(str(out_path), embedding)
-        return str(out_path)
+        return _save_embedding(embedding, curr_id, save_path, text=text, subdirs=subdirs)
 
     def _process_row(self, embedding, id, save_path=None, text=None, subdirs=False):
         row = {"row_id": id}
@@ -194,7 +242,7 @@ class EmbeddingGenerator:
 
     def generate_text_embeddings(self, texts: Iterable[str], output_path=None, overwrite=False):
         """Generate and save text embeddings for an explicit list of texts."""
-        store = EmbeddingStore(EmbeddingType=CLIPTextEmbedding, FeatureGenerator=self.model)
+        store = EmbeddingStore(FeatureGenerator=self.model)
         filepath, full_save_path = self._create_files(type="text", save_path=output_path)
         existing = self._get_existing_row_ids(filepath, full_save_path)
         row_data = []
@@ -239,8 +287,7 @@ class EmbeddingGenerator:
             if input_csv is not None:
                 loader_kwargs.update(dataset_file=input_csv, id_column=id_column)
             dataloader = StimuliLoader(**loader_kwargs).dataloader()
-            self.model = CLIPGenerator(device=self.device, text_prompt=self.text_prompt,
-                                       dataloader=dataloader)
+            self.model = self._build_model(dataloader=dataloader)
             self._generate_sequential(output_path=output_path, overwrite=overwrite, subdirs=subdirs)
 
     # ------------------------------------------------------------------
@@ -248,7 +295,7 @@ class EmbeddingGenerator:
     # ------------------------------------------------------------------
 
     def _generate_sequential(self, output_path=None, overwrite=False, subdirs=False):
-        store = EmbeddingStore(EmbeddingType=CLIPImageEmbedding, FeatureGenerator=self.model)
+        store = EmbeddingStore(FeatureGenerator=self.model)
         filepath, full_save_path = self._create_files(output_path)
         existing = self._get_existing_row_ids(filepath, full_save_path)
         all_text = set()
@@ -279,7 +326,7 @@ class EmbeddingGenerator:
                     self._flush(row_data, store, filepath, full_save_path, overwrite)
         if not self.config.save_every_batch:
             self._flush(row_data, store, filepath, full_save_path, overwrite)
-        if all_text:
+        if all_text and self.model.supports_text:
             self.generate_text_embeddings(all_text, output_path=output_path, overwrite=overwrite)
 
     # ------------------------------------------------------------------
@@ -346,5 +393,5 @@ class EmbeddingGenerator:
             df = pd.read_csv(input_csv)
             text_cols = [c for c in df.columns if c.startswith("text")]
             all_text = set(df[text_cols].values.flatten().tolist()) - {None, float("nan"), ""}
-            if all_text:
+            if all_text and self.model.supports_text:
                 self.generate_text_embeddings(all_text, output_path=output_path, overwrite=overwrite)
