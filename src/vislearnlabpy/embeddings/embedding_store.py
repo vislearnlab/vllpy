@@ -14,6 +14,8 @@ import pandas as pd
 from pathlib import Path
 import os
 
+from vislearnlabpy.embeddings.similarity_utils import compute_rdm, plot_rdm
+
 # ── Dynamic schema factories ──────────────────────────────────────────────────
 
 def _image_embedding_type(dim: int):
@@ -222,8 +224,7 @@ class EmbeddingStore():
         else:
             return sim_generator.specific_sims(self.EmbeddingList, text_pairs, output_path)
 
-    def compute_text_rdm(self, sim_type="cosine", output_path=None):
-        from vislearnlabpy.embeddings.similarity_utils import compute_rdm, plot_rdm
+    def compute_text_rdm(self, sim_type="cosine", output_path=None, ranked=False):
         texts = self.EmbeddingList.text
         if texts is None:
             raise ValueError("No text column in embeddings")
@@ -238,14 +239,15 @@ class EmbeddingStore():
             text_means.append(np.mean(embeddings_for_text, axis=0))
         text_means = np.stack(text_means)
         # Compute RDM
-        rdm = compute_rdm(text_means, method=sim_type)
+        rdm = compute_rdm(text_means, method=sim_type, ranked=ranked)
         # Plot RDM if output_path is given
         if output_path:
+            suffix = "ranked" if ranked else "nonranked"
             plot_rdm(
                 out_path=output_path,
-                X=text_means,
-                method=sim_type,
+                rdm=rdm,
                 x_labels=unique_texts,
                 y_labels=unique_texts,
+                filename=f"rdm_{suffix}"
             )
         return rdm
