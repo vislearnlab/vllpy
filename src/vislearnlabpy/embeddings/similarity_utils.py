@@ -51,7 +51,7 @@ def cosine_matrix(X: Array, Y: Array=None, a_min: float = -1.0, a_max: float = 1
     cos_mat = (num / denom).clip(min=a_min, max=a_max)
     return cos_mat
 
-def compute_rdm(X: Array, method: str) -> Array:
+def compute_rdm(X: Array, method: str, ranked: bool = False) -> Array:
     """Compute representational dissimilarity matrix based on some distance measure.
 
     Parameters
@@ -62,6 +62,8 @@ def compute_rdm(X: Array, method: str) -> Array:
         and p is the feature dimensionaltiy.
     method : str
         Distance metric (e.g., correlation, cosine).
+    ranked : bool (default: False)
+        Whether to rank the RDM values or display raw similarity.
 
     Returns
     -------
@@ -80,7 +82,12 @@ def compute_rdm(X: Array, method: str) -> Array:
             rsm = cosine_matrix(X)
         elif method == "gaussian":
             rsm = gaussian_kernel(X)
-    return np.round(1 - rsm, 5)
+        rdm = np.round(1 - rsm, 5)
+
+    if ranked:
+        rdm = rankdata(rdm).reshape(rdm.shape)
+
+    return rdm
 
 def correlate_rdms(
     rdm_1: Array,
@@ -110,41 +117,34 @@ def correlate_rdms(
 
 def plot_rdm(
     out_path: str,
-    X: Array,
-    method: str = "correlation",
+    rdm: Array,
     format: str = ".png",
     colormap: str = "cividis",
     show_plot: bool = False,
-    x_labels: list = None,  # Optional parameter for x-axis labels
-    y_labels: list = None   # Optional parameter for y-axis labels
+    x_labels: list = None,
+    y_labels: list = None
 ) -> None:
-    """Compute and plot representational dissimilarity matrix based on some distance measure.
+    """Plot representational dissimilarity matrix.
 
     Parameters
     ----------
     out_path : str
         Output directory. Directory where to store plots.
-    X : ndarray
-        Input array. Feature matrix of size n x m,
-        where n corresponds to the number of observations
-        and m is the number of latent dimensions.
-    method : str
-        Distance metric (e.g., correlation, cosine).
+    rdm : ndarray
+        Input RDM matrix.
     format : str
         Image format in which to store visualized RDM.
     colormap : str
         Colormap for visualization of RDM.
     show_plot : bool
         Whether to show visualization of RDM after storing it to disk.
-
-    Returns
-    -------
-    output : ndarray
-        Returns the representational dissimilarity matrix.
+    x_labels : list, optional
+        x-axis labels
+    y_labels : list, optional
+        y-axis labels
     """
-    rdm = compute_rdm(X, method)
     plt.figure(figsize=(10, 4), dpi=200)
-    plt.imshow(rankdata(rdm).reshape(rdm.shape), cmap=getattr(plt.cm, colormap))
+    plt.imshow(rdm, cmap=getattr(plt.cm, colormap))
     # Set x and y axis labels if provided
     if x_labels is not None:
         plt.xticks(ticks=np.arange(len(x_labels)), labels=x_labels, rotation=90)
