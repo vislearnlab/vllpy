@@ -222,13 +222,23 @@ class EmbeddingStore():
         else:
             return sim_generator.specific_sims(self.EmbeddingList, text_pairs, output_path)
 
-    def compute_text_rdm(self, sim_type="cosine", output_path=None):
+    def compute_text_rdm(self, sim_type="cosine", output_path=None, order=None):
         from vislearnlabpy.embeddings.similarity_utils import compute_rdm, plot_rdm
         texts = self.EmbeddingList.text
         if texts is None:
             raise ValueError("No text column in embeddings")
         # Unique texts
         unique_texts = sorted(set(texts))
+        
+        if order is not None:
+            missing = set(unique_texts) - set(order)
+            extra = set(order) - set(unique_texts)
+            if extra:
+                raise ValueError(f"order contains labels not in embeddings: {extra}")
+            if missing:
+                print(f"Skipping labels in embeddings not in passed in list: {missing}")
+            unique_texts = list(order) 
+        
         # Compute mean embedding for each unique text
         text_means = []
         for text in unique_texts:
@@ -249,3 +259,4 @@ class EmbeddingStore():
                 y_labels=unique_texts,
             )
         return rdm
+    

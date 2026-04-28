@@ -21,3 +21,6 @@ src/vislearnlabpy/models/clip_model.py
 src/vislearnlabpy/models/feature_generator.py
 src/vislearnlabpy/models/hf_model.py
 src/vislearnlabpy/models/multimodal_model.py
+src/vislearnlabpy/models/silicon_menagerie_utils.py
+src/vislearnlabpy/models/vision_transformer_dino_mugs.py
+src/vislearnlabpy/models/vision_transformer_mae.py

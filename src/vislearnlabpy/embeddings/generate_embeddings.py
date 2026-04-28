@@ -2,7 +2,7 @@ from dataclasses import dataclass, replace as dataclass_replace
 import math
 from typing import Any, Iterable, Optional
 from vislearnlabpy.models.clip_model import CLIPGenerator
-from vislearnlabpy.models.hf_model import HuggingFaceVisionGenerator, HuggingFaceCLIPGenerator, MODEL_PRESETS
+from vislearnlabpy.models.hf_model import HuggingFaceVisionGenerator, HuggingFaceCLIPGenerator, MODEL_PRESETS, SiliconMenagerieGenerator
 from vislearnlabpy.embeddings.stimuli_loader import StimuliLoader
 from vislearnlabpy.embeddings.utils import save_df, indexed_embeddings, is_url
 from vislearnlabpy.embeddings.embedding_store import EmbeddingStore
@@ -61,6 +61,8 @@ try:
                     model_name=config.model_name, text_prompt=config.text_prompt,
                     device=self.device, token=config.hf_token
                 )
+            elif config.model_source == "silicon_menagerie":
+                self.model = SiliconMenagerieGenerator(model_name=config.model_name, device=self.device)
             else:
                 self.model = CLIPGenerator(device=self.device, text_prompt=config.text_prompt)
             self.subdirs = subdirs
@@ -182,7 +184,7 @@ class EmbeddingGenerator:
                 device=self.device,
                 token=self.config.hf_token,
             )
-        if self.config.model_source == "huggingface_clip":
+        elif self.config.model_source == "huggingface_clip":
             return HuggingFaceCLIPGenerator(
                 model_name=self.config.model_name,
                 text_prompt=self.config.text_prompt,
@@ -190,6 +192,8 @@ class EmbeddingGenerator:
                 device=self.device,
                 token=self.config.hf_token,
             )
+        elif self.config.model_source == "silicon_menagerie":
+            return SiliconMenagerieGenerator(model_name=self.config.model_name, dataloader=dataloader, device=self.device)
         # default: openai_clip
         return CLIPGenerator(
             device=self.device,

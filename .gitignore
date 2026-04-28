@@ -4,6 +4,10 @@ misc
 **/.DS_Store
 **/__pycache__/
 **.env
+*.png
+*.npy
+*.docs
+*.csv
 examples/drawings/*
 examples/**/output/
 # Unignore only *.ipynb files and auth file inside examples/drawings/
