@@ -230,6 +230,16 @@ class EmbeddingStore():
             raise ValueError("No text column in embeddings")
         # Unique texts
         unique_texts = sorted(set(texts))
+        
+        if order is not None:
+            missing = set(unique_texts) - set(order)
+            extra = set(order) - set(unique_texts)
+            if extra:
+                raise ValueError(f"order contains labels not in embeddings: {extra}")
+            if missing:
+                print(f"Skipping labels in embeddings not in passed in list: {missing}")
+            unique_texts = list(order) 
+        
         # Compute mean embedding for each unique text
         text_means = []
         for text in unique_texts:
@@ -251,3 +261,4 @@ class EmbeddingStore():
                 filename=f"rdm_{suffix}"
             )
         return rdm
+    
