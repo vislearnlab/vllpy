@@ -14,7 +14,6 @@ import pandas as pd
 from pathlib import Path
 import os
 
-
 # ── Dynamic schema factories ──────────────────────────────────────────────────
 
 def _image_embedding_type(dim: int):
@@ -223,7 +222,7 @@ class EmbeddingStore():
         else:
             return sim_generator.specific_sims(self.EmbeddingList, text_pairs, output_path)
 
-    def compute_text_rdm(self, sim_type="cosine", output_path=None, ranked=False):
+    def compute_text_rdm(self, sim_type="cosine", output_path=None, order=None):
         from vislearnlabpy.embeddings.similarity_utils import compute_rdm, plot_rdm
         texts = self.EmbeddingList.text
         if texts is None:
@@ -231,6 +230,14 @@ class EmbeddingStore():
         # Unique texts
         unique_texts = sorted(set(texts))
         
+        if order is not None:
+            missing = set(unique_texts) - set(order)
+            extra = set(order) - set(unique_texts)
+            if extra:
+                raise ValueError(f"order contains labels not in embeddings: {extra}")
+            if missing:
+                print(f"Skipping labels in embeddings not in passed in list: {missing}")
+            unique_texts = list(order) 
         
         # Compute mean embedding for each unique text
         text_means = []
@@ -241,16 +248,15 @@ class EmbeddingStore():
             text_means.append(np.mean(embeddings_for_text, axis=0))
         text_means = np.stack(text_means)
         # Compute RDM
-        rdm = compute_rdm(text_means, method=sim_type, ranked=ranked)
+        rdm = compute_rdm(text_means, method=sim_type)
         # Plot RDM if output_path is given
         if output_path:
-            suffix = "ranked" if ranked else "nonranked"
             plot_rdm(
                 out_path=output_path,
-                rdm=rdm,
+                X=text_means,
+                method=sim_type,
                 x_labels=unique_texts,
                 y_labels=unique_texts,
-                title=f"rdm_{suffix}"
             )
         return rdm
     
