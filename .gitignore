@@ -10,6 +10,8 @@ misc
 *.csv
 examples/drawings/*
 examples/**/output/
+examples/input/inputs.csv
+*.png
 # Unignore only *.ipynb files and auth file inside examples/drawings/
 !examples/drawings/*.ipynb
 !examples/drawings/auth_template.txt
