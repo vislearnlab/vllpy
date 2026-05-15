@@ -117,12 +117,13 @@ def correlate_rdms(
 
 def plot_rdm(
     out_path: str,
-    rdm: Array,
+    rdm: Array, # must be unranked for ranked to work
     format: str = ".png",
     colormap: str = "cividis",
     show_plot: bool = False,
     x_labels: list = None,
-    y_labels: list = None
+    y_labels: list = None,
+    ranked: bool = False
 ) -> None:
     """Plot representational dissimilarity matrix.
 
@@ -142,7 +143,14 @@ def plot_rdm(
         x-axis labels
     y_labels : list, optional
         y-axis labels
+    ranked : bool
+        Whether to rank-transform the RDM before plotting. The input RDM must be unranked.
+        Ranking upstream in the compute_rdm function is lossy and cannot be undone, so
+        passing a pre-ranked RDM will produce incorrect plots.
     """
+    if ranked:
+        rdm = rankdata(rdm).reshape(rdm.shape)
+    
     plt.figure(figsize=(10, 4), dpi=200)
     plt.imshow(rdm, cmap=getattr(plt.cm, colormap))
     # Set x and y axis labels if provided
