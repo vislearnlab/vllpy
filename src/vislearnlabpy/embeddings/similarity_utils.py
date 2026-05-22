@@ -123,7 +123,8 @@ def plot_rdm(
     show_plot: bool = False,
     x_labels: list = None,
     y_labels: list = None,
-    ranked: bool = False
+    ranked: bool = False,
+    title:str = "rdm"
 ) -> None:
     """Plot representational dissimilarity matrix.
 
@@ -163,7 +164,7 @@ def plot_rdm(
     if not os.path.exists(out_path):
         print("\n...Output directory did not exists. Creating directories.\n")
         os.makedirs(out_path)
-    plt.savefig(os.path.join(out_path, "".join(("rdm", format))))
+    plt.savefig(os.path.join(out_path, "".join((title, format))))
     if show_plot:
         plt.show()
     plt.close()

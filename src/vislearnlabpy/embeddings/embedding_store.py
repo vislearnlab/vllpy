@@ -261,4 +261,3 @@ class EmbeddingStore():
                 title=f"rdm_{suffix}"
             )
         return rdm
-    

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: vislearnlabpy
-Version: 0.0.4.1
+Version: 0.0.4.2
 Summary: Visual Learning Lab utility files and pipelines
 Author-email: Tarun Sepuri <tarunsepuri@gmail.com>
 License-Expression: MIT
@@ -52,6 +52,11 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 Here is as an example of how to generate a CSV file with embeddings from a list of images in a directory. You can also use this to generate npy files and doc files by changing the output type in the command below, and generate the embeddings from a CSV file instead by using `input_file` instead of `input_dir`
 ``` 
 python embedding_generator.py --input_dir examples/input --output_path examples/output --output_type csv --overwrite --model_name clip
+```
+
+Here is an example of how to generate npy files for embeddings from a list of images within subdirectories in a folder on Tversky using the `dinov3-babyview` model. For certain models, you will need a HuggingFace account and [a HuggingFace access token](https://huggingface.co/docs/hub/en/security-tokens). Set `HF_TOKEN=xxxx` in a `.env` file in the main directory of your project to be able to access restricted models. Also note that by default, npy files are generated in parallel using Ray with all available GPUs. To use specific GPUs, like the first and second GPUs for example, try using `export CUDA_VISIBLE_DEVICES=0,1` Ideally run this command in a (tmux window)[https://www.redhat.com/en/blog/introduction-tmux-linux] if you have a large input directory.
+``` 
+python embedding_generator.py --input_dir /labs/vislearnlab/data/THINGS-dataset/object_images --output_path /labs/vislearnlab/data/THINGS-dataset/things_embeddings --output_type npy --overwrite --model_name clip --subdirs --batch_size 1000 --ray_temp_dir /Scratch/tmp/ray
 ```
 
 For more detailed examples, please look at the demo in the Jupyter notebooks within the `examples` folder.
