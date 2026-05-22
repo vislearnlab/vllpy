@@ -1,9 +1,10 @@
 from dataclasses import dataclass, replace as dataclass_replace
 import math
+import time
 from typing import Any, Iterable, Optional
 from vislearnlabpy.models.clip_model import CLIPGenerator
 from vislearnlabpy.models.hf_model import HuggingFaceVisionGenerator, HuggingFaceCLIPGenerator, MODEL_PRESETS, SiliconMenagerieGenerator
-from vislearnlabpy.embeddings.stimuli_loader import StimuliLoader
+from vislearnlabpy.embeddings.stimuli_loader import StimuliLoader, StimuliDataset
 from vislearnlabpy.embeddings.utils import save_df, indexed_embeddings, is_url
 from vislearnlabpy.embeddings.embedding_store import EmbeddingStore
 import torch
@@ -13,7 +14,17 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from glob import glob
-from tqdm import tqdm
+from tqdm.auto import tqdm
+import logging
+logger = logging.getLogger(__name__)
+
+def _ts():
+    """Current timestamp string for logs."""
+    return time.strftime("%H:%M:%S")
+
+
+def _elapsed(t0):
+    return f"{time.time() - t0:.2f}s"
 
 
 @dataclass
@@ -21,74 +32,141 @@ class EmbeddingConfig:
     """Configuration for EmbeddingGenerator (model and output settings).
 
     model_source options:
-      "openai_clip"   – default, uses the openai/CLIP package (ViT-B/32 etc.)
-      "huggingface"   – any HuggingFace vision model via AutoModel
-                        (DINOv2, DINOv3, HF CLIP, …); set model_name to the HF repo id.
+      "openai_clip"   - default, uses the openai/CLIP package (ViT-B/32 etc.)
+      "huggingface"   - any HuggingFace vision model via AutoModel
+                        (DINOv2, DINOv3, HF CLIP, ...); set model_name to the HF repo id.
     """
     model_type: str = "clip"               # human-readable label used in output filenames
     model_source: str = "openai_clip"      # "openai_clip" | "huggingface"
     model_name: str = "ViT-B/32"          # variant for openai_clip, or HF repo id
     hf_token: Optional[str] = None        # HuggingFace token for private/gated repos
     output_type: str = "csv"              # "csv", "npy", or "doc"
-    device: Optional[str] = None          # None → auto-detect CUDA/CPU
+    device: Optional[str] = None          # None -> auto-detect CUDA/CPU
     text_prompt: str = "a photo of a "    # prepended to every text label (CLIP only)
     normalize_embeddings: bool = False
     transform: Optional[Any] = None       # torchvision transform pipeline
     num_actors: Optional[int] = None      # for parallel npy generation (Ray)
-    gpu_per_actor: float = 0.3            # for parallel npy generation (Ray)
+    gpu_per_actor: float = 0.4            # for parallel npy generation (Ray)
     save_every_batch: bool = False        # save after every batch instead of all at end
+    ray_temp_dir: Optional[str] = None   # override Ray's temp/spill directory (e.g. /Scratch/tmp/ray)
 
 try:
     import ray
     from torch.utils.data import Subset, DataLoader
+    from torchvision import transforms as T
 
     @ray.remote(num_gpus=0.3)
     class _EmbeddingActor:
         """Internal Ray actor for parallel npy embedding generation."""
 
         def __init__(self, input_dir, input_csv, id_column, config: "EmbeddingConfig", subdirs):
+            t_init = time.time()
             self.input_dir = input_dir
             self.input_csv = input_csv
             self.id_column = id_column
             self.config = config
-            self.device = config.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+            self.subdirs = subdirs
+            self._chunk_count = 0
+
+            # Use Ray's GPU assignment -- within each actor the assigned GPU
+            # is always remapped to cuda:0 via CUDA_VISIBLE_DEVICES
+            gpu_ids = ray.get_gpu_ids()
+            self.device = "cuda:0" if gpu_ids else "cpu"
+            logger.debug(f"[{_ts()}] [actor pid={os.getpid()}] CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')} device={self.device}")
+
+            t_model = time.time()
             if config.model_source == "huggingface":
+                logger.debug("HuggingFaceVisionGenerator")
                 self.model = HuggingFaceVisionGenerator(
                     model_name=config.model_name, device=self.device, token=config.hf_token
                 )
             elif config.model_source == "huggingface_clip":
+                logger.debug("HuggingFaceCLIPGenerator")
                 self.model = HuggingFaceCLIPGenerator(
                     model_name=config.model_name, text_prompt=config.text_prompt,
                     device=self.device, token=config.hf_token
                 )
             elif config.model_source == "silicon_menagerie":
+                logger.debug("SiliconMenagerieGenerator")
                 self.model = SiliconMenagerieGenerator(model_name=config.model_name, device=self.device)
             else:
+                logger.debug("CLIPGenerator")
                 self.model = CLIPGenerator(device=self.device, text_prompt=config.text_prompt)
-            self.subdirs = subdirs
+            logger.debug(f"[{_ts()}] [actor pid={os.getpid()}] model loaded in {_elapsed(t_model)}")
 
-        def _save_embedding(self, embedding, curr_id, save_path, text=None):
-            return _save_embedding(embedding, curr_id, save_path, text=text, subdirs=self.subdirs)
+            # Build a transform that includes the model's own preprocessor so that
+            # image decoding + resizing + normalization all happen in DataLoader workers
+            # (parallel CPU) rather than serially inside image_embeddings().
+            t_transform = time.time()
+            if hasattr(self.model, "make_processor_transform"):
+                processor_transform = self.model.make_processor_transform()
+                if config.transform is not None:
+                    dataset_transform = T.Compose([config.transform, processor_transform])
+                else:
+                    dataset_transform = processor_transform
+                logger.debug(f"[{_ts()}] [actor pid={os.getpid()}] processor transform built in {_elapsed(t_transform)} — preprocessing will run in DataLoader workers")
+            else:
+                dataset_transform = config.transform
+                print(f"[{_ts()}] [actor pid={os.getpid()}] no make_processor_transform — using model's internal preprocessing")
+
+            # Build dataset once -- avoids re-scanning the image directory on every chunk
+            t_dataset = time.time()
+            loader_kwargs = dict(image_folder=input_dir, batch_size=1,
+                                 stimuli_type="images", transform=dataset_transform)
+            if input_csv is not None:
+                loader_kwargs.update(dataset_file=input_csv, id_column=id_column)
+            self.base_loader = StimuliLoader(**loader_kwargs)
+            self.dataset = self.base_loader.dataloader().dataset
+            logger.debug(f"[{_ts()}] [actor pid={os.getpid()}] dataset built ({len(self.dataset)} items) in {_elapsed(t_dataset)}")
+
+            # Cache existing npy ids once -- updated incrementally as embeddings are saved
+            self.full_save_path = None
+            self.existing_ids = None
+
+            logger.debug(f"[{_ts()}] [actor pid={os.getpid()}] __init__ complete in {_elapsed(t_init)}")
+
+        def _init_save_path(self, save_path):
+            """Lazily initialize save path and existing id cache."""
+            if self.full_save_path is None:
+                t0 = time.time()
+                self.full_save_path = _image_save_path(save_path, self.config.model_type)
+                self.existing_ids = _get_existing_npy_ids(self.full_save_path)
+                logger.debug(f"[{_ts()}] [actor pid={os.getpid()}] save path init: {len(self.existing_ids)} existing ids found in {_elapsed(t0)}")
+
+        def _save_embedding(self, embedding, curr_id, text=None):
+            path = _save_embedding(embedding, curr_id, self.full_save_path, text=text, subdirs=self.subdirs)
+            rel = str(Path(path).with_suffix("").relative_to(self.full_save_path))
+            self.existing_ids.add(rel)
+            return path
 
         def process_chunk(self, indices, save_path, overwrite, batch_size, num_workers=4):
-            loader_kwargs = dict(image_folder=self.input_dir, batch_size=batch_size,
-                                 stimuli_type="images", transform=self.config.transform)
-            if self.input_csv is not None:
-                loader_kwargs.update(dataset_file=self.input_csv, id_column=self.id_column)
-            base_loader = StimuliLoader(**loader_kwargs)
-            dataset = base_loader.dataloader().dataset
-            subset = Subset(dataset, indices)
-            dataloader = DataLoader(subset, batch_size=batch_size, num_workers=num_workers,
-                                    collate_fn=base_loader.collator)
+            self._chunk_count += 1
+            chunk_id = self._chunk_count
+            t_chunk = time.time()
+            logger.debug(f"[{_ts()}] [actor pid={os.getpid()}] chunk={chunk_id} start: {len(indices)} images, batch_size={batch_size}, num_workers={num_workers}")
 
-            full_save_path = _image_save_path(save_path, self.config.model_type)
-            existing_ids = _get_existing_npy_ids(full_save_path)
+            self._init_save_path(save_path)
+
+            t_loader = time.time()
+            subset = Subset(self.dataset, indices)
+            dataloader = DataLoader(subset, batch_size=batch_size, num_workers=num_workers,
+                                    collate_fn=self.base_loader.collator)
+            logger.debug(f"[{_ts()}] [actor pid={os.getpid()}] chunk={chunk_id} dataloader built in {_elapsed(t_loader)}")
+
+            n_batches = 0
+            n_images = 0
+            n_skipped = 0
+            t_gpu_total = 0.0
+            t_io_total = 0.0
+            t_load_total = 0.0
 
             with torch.no_grad():
                 for d in dataloader:
+                    t_batch = time.time()
                     batch_images = d.get("images")
                     batch_texts = d.get("text", None)
                     batch_ids = d.get("item_id")
+                    t_load_total += time.time() - t_batch
 
                     to_process = [
                         (img, txt, str(iid))
@@ -97,15 +175,37 @@ try:
                             batch_texts if batch_texts else itertools.repeat(None, len(batch_images)),
                             batch_ids,
                         )
-                        if img is not None and (str(iid) not in existing_ids or overwrite)
+                        if img is not None and (str(iid) not in self.existing_ids or overwrite)
                     ]
+                    n_skipped += len(batch_images) - len(to_process)
+
                     if not to_process:
                         continue
 
                     imgs, txts, ids = zip(*to_process)
+                    t_gpu = time.time()
                     embeddings = self.model.image_embeddings(list(imgs), self.config.normalize_embeddings).cpu().numpy()
+                    t_gpu_total += time.time() - t_gpu
+
+                    t_io = time.time()
                     for emb, iid, txt in zip(embeddings, ids, txts):
-                        self._save_embedding(emb, iid, full_save_path, text=txt)
+                        self._save_embedding(emb, iid, text=txt)
+                    t_io_total += time.time() - t_io
+
+                    n_batches += 1
+                    n_images += len(imgs)
+
+            t_total = time.time() - t_chunk
+            throughput = n_images / t_total if t_total > 0 else 0
+            logger.debug(
+                f"[{_ts()}] [actor pid={os.getpid()}] chunk={chunk_id} done: "
+                f"{n_images} images in {_elapsed(t_chunk)} "
+                f"({throughput:.1f} img/s) | "
+                f"dataload={t_load_total:.2f}s  gpu={t_gpu_total:.2f}s  io={t_io_total:.2f}s  "
+                f"skipped={n_skipped}  batches={n_batches}"
+            )
+
+            return len(indices)
 
 except ImportError:
     _EmbeddingActor = None
@@ -136,7 +236,7 @@ def _save_embedding(embedding, curr_id, save_path, text=None, subdirs=False):
 
 def _image_save_path(save_path, model_type):
     base = os.path.join(os.getcwd(), "output") if save_path is None else str(save_path)
-    full = os.path.join(base, "image_embeddings")
+    full = os.path.join(base, f"{model_type}_image_embeddings")
     os.makedirs(full, exist_ok=True)
     return full
 
@@ -155,7 +255,7 @@ def _get_existing_npy_ids(full_save_path):
 class EmbeddingGenerator:
     def __init__(self, config: Optional[EmbeddingConfig] = None, model=None):
         self.config = config or EmbeddingConfig()
-        self.device = self.config.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = self.config.device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model_type = self.config.model_type
         self.output_type = self.config.output_type
         self.transform = self.config.transform
@@ -267,7 +367,7 @@ class EmbeddingGenerator:
                                   parallel=None, subdirs=False):
         """Generate and save image embeddings.
 
-        parallel: None (auto — uses Ray for npy, sequential for csv/doc),
+        parallel: None (auto -- uses Ray for npy, sequential for csv/doc),
                   True (force parallel, requires output_type='npy' and ray installed),
                   False (force sequential).
         """
@@ -345,33 +445,59 @@ class EmbeddingGenerator:
                 "Ray is required for parallel embedding generation. "
                 "Install with: pip install ray[default]"
             )
+
+        t_start = time.time()
+        logger.debug(f"[{_ts()}] [main] _generate_parallel start")
+
         loader_kwargs = dict(image_folder=input_dir, batch_size=batch_size,
-                             stimuli_type="images", transform=self.transform)
+                            stimuli_type="images", transform=self.transform)
         if input_csv is not None:
             loader_kwargs.update(dataset_file=input_csv, id_column=id_column)
+
+        t_scan = time.time()
         dataset = StimuliLoader(**loader_kwargs).dataloader().dataset
         total = len(dataset)
+        logger.debug(f"[{_ts()}] [main] dataset scan complete: {total} images in {_elapsed(t_scan)}")
+
         if total == 0:
             print("No images found.")
             return
 
-        ray.init(ignore_reinit_error=True)
+        ray_kwargs = {"ignore_reinit_error": True}
+        if self.config.ray_temp_dir:
+            ray_kwargs["_temp_dir"] = self.config.ray_temp_dir
+
+        t_ray = time.time()
+        ray.init(**ray_kwargs)
+        logger.debug(f"[{_ts()}] [main] ray.init complete in {_elapsed(t_ray)}")
+        logger.debug(f"[{_ts()}] [main] ray resources: {ray.available_resources()}")
+
+        actors = []
         try:
             num_gpus = max(0, torch.cuda.device_count())
+            logger.debug(f"[{_ts()}] [main] torch.cuda.device_count()={num_gpus}")
+
             if num_gpus == 0:
-                print("No GPUs detected. Running with CPU only with 2 actors by default.")
-                num_gpus = 1 
-                self.config.gpu_per_actor = 0
+                print(f"[{_ts()}] [main] no GPUs detected, falling back to CPU with 2 actors")
+                num_gpus = 1
+                self.config = dataclass_replace(self.config, gpu_per_actor=0)
+
             if self.config.num_actors == 0:
-                print("num_actors set to 0, running sequentially on main process.")
+                print(f"[{_ts()}] [main] num_actors=0, running sequentially")
                 self._generate_sequential(output_path=output_path, subdirs=subdirs, overwrite=overwrite)
-            max_actors_per_gpu= int(1 / self.config.gpu_per_actor + 0.1) if self.config.gpu_per_actor > 0 else 2
-            actor_count = min(self.config.num_actors or num_gpus * 2, num_gpus * max_actors_per_gpu) 
-            chunk_size = math.ceil(total / actor_count)
+                return
+
+            max_actors_per_gpu = int(1 / self.config.gpu_per_actor + 0.1) if self.config.gpu_per_actor > 0 else 2
+            actor_count = min(self.config.num_actors or num_gpus * 2, num_gpus * max_actors_per_gpu)
+            chunk_size = max(batch_size * 4, total // (actor_count * 10))
             chunks = [list(range(i, min(i + chunk_size, total))) for i in range(0, total, chunk_size)]
-            print(f"Spawning {len(chunks)} Ray actors for {total} images (chunk size={chunk_size})")
+
+            print(f"[{_ts()}] [main] gpu_per_actor={self.config.gpu_per_actor}  max_actors_per_gpu={max_actors_per_gpu}  actor_count={actor_count}")
+            print(f"[{_ts()}] [main] chunk_size={chunk_size}  num_chunks={len(chunks)}  batch_size={batch_size}")
+            print(f"[{_ts()}] [main] spawning {actor_count} actors...")
 
             actor_config = dataclass_replace(self.config, transform=None)
+            t_spawn = time.time()
             actors = [
                 _EmbeddingActor.options(num_gpus=self.config.gpu_per_actor).remote(
                     input_dir=input_dir,
@@ -380,23 +506,64 @@ class EmbeddingGenerator:
                     config=actor_config,
                     subdirs=subdirs,
                 )
-                for _ in chunks
+                for _ in range(actor_count)
             ]
-            ray.get([
-                actor.process_chunk.remote(
-                    indices=chunk, save_path=output_path,
-                    overwrite=overwrite, batch_size=batch_size,
-                )
-                for actor, chunk in zip(actors, chunks)
-            ])
-            print("All embedding generation tasks completed.")
-        finally:
-            ray.shutdown()
 
-        # Text embeddings are fast — generate sequentially on the main process
+            # Seed each actor with its first chunk
+            futures = {}
+            next_chunk = 0
+            for actor in actors:
+                if next_chunk < len(chunks):
+                    f = actor.process_chunk.remote(
+                        indices=chunks[next_chunk], save_path=output_path,
+                        overwrite=overwrite, batch_size=batch_size,
+                    )
+                    futures[f] = actor
+                    next_chunk += 1
+            logger.debug(f"[{_ts()}] [main] {len(futures)} initial chunks dispatched in {_elapsed(t_spawn)}")
+
+            t_loop = time.time()
+            chunks_done = 0
+            with tqdm(total=total, desc="Generating embeddings", unit="img") as pbar:
+                while futures:
+                    t_wait = time.time()
+                    done, _ = ray.wait(list(futures.keys()), num_returns=1)
+                    f = done[0]
+                    actor = futures.pop(f)
+                    n_done = ray.get(f)  # surfaces exceptions
+                    chunks_done += 1
+                    elapsed_wait = time.time() - t_wait
+                    pbar.update(n_done)
+
+                    overall_throughput = pbar.n / (time.time() - t_loop) if (time.time() - t_loop) > 0 else 0
+                    logger.debug(
+                        f"[{_ts()}] [main] chunk {chunks_done}/{len(chunks)} returned "
+                        f"({n_done} imgs, wait={elapsed_wait:.2f}s) | "
+                        f"overall={overall_throughput:.1f} img/s  "
+                        f"pending={len(futures)}  remaining_chunks={len(chunks)-next_chunk}"
+                    )
+
+                    if next_chunk < len(chunks):
+                        new_f = actor.process_chunk.remote(
+                            indices=chunks[next_chunk], save_path=output_path,
+                            overwrite=overwrite, batch_size=batch_size,
+                        )
+                        futures[new_f] = actor
+                        next_chunk += 1
+
+            print(f"[{_ts()}] [main] all chunks complete in {_elapsed(t_loop)} | total wall time {_elapsed(t_start)}")
+
+        finally:
+            print(f"[{_ts()}] [main] shutting down actors...")
+            for actor in actors:
+                ray.kill(actor, no_restart=True)
+            ray.shutdown()
+            print(f"[{_ts()}] [main] ray shutdown")
+
+        # Text embeddings are fast -- generate sequentially on the main process
         if input_csv is not None:
             df = pd.read_csv(input_csv)
             text_cols = [c for c in df.columns if c.startswith("text")]
-            all_text = set(df[text_cols].values.flatten().tolist()) - {None, float("nan"), ""}
+            all_text = {t for t in df[text_cols].values.flatten() if isinstance(t, str) and t != ""}
             if all_text and self.model.supports_text:
                 self.generate_text_embeddings(all_text, output_path=output_path, overwrite=overwrite)
