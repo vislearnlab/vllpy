@@ -39,8 +39,13 @@ class MultimodalModel(FeatureGenerator):
             return self.image_embeddings([images], normalize_embeddings)
         if not images:
             return torch.empty(0)
-        preprocessed = [self.preprocess_image(img) for img in images]
-        preprocessed = [img.squeeze(0) if img.dim() == 4 else img for img in preprocessed]
+
+        # Fast path: already tensors from DataLoader workers
+        if isinstance(images[0], torch.Tensor):
+            preprocessed = [img.squeeze(0) if img.dim() == 4 else img for img in images]
+        else:
+            preprocessed = [self.preprocess_image(img).squeeze(0) for img in images]
+
         image_batch = torch.stack(preprocessed).to(self.device)
         with torch.no_grad():
             embeddings = self.encode_image(image_batch)
@@ -85,7 +90,18 @@ class MultimodalModel(FeatureGenerator):
         distractor_similarity = self.similarity(image_embeddings[1], text_embedding)
         luce = distractor_similarity / (distractor_similarity + target_similarity)
         return luce
+    
+    def make_processor_transform(self):
+        """Return the CLIP preprocess transform for use in DataLoader workers."""
+        preprocess = self.preprocess  # torchvision Compose pipeline
 
+        def _transform(img):
+            if isinstance(img, torch.Tensor):
+                from torchvision import transforms as T
+                img = T.ToPILImage()(img)
+            return preprocess(img)  # returns a tensor directly unlike HF processor
+
+        return _transform
     def similarities(self, word1, word2, images):
         valid_images = [img for img in images if img is not None]
         similarity_scores = []

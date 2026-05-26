@@ -36,7 +36,7 @@ class HuggingFaceGenerator(FeatureGenerator):
         processor_cls: Processor class (e.g. AutoImageProcessor, CLIPProcessor).
         text_prompt:  Prefix prepended to text labels when generating text embeddings.
         dataloader:   Optional StimuliLoader dataloader.
-        device:       "cuda:0", "cpu", etc.  None → auto-detect.
+        device:       "cuda:0", "cpu", etc.  None -> auto-detect.
         token:        HuggingFace access token for private/gated repos.
     """
     supports_text: bool = False
@@ -60,13 +60,25 @@ class HuggingFaceGenerator(FeatureGenerator):
         return 512
 
     def image_embeddings(self, images, normalize_embeddings=False):
-        """Returns an (N, D) tensor. Caller must ensure no None images."""
+        """Returns an (N, D) tensor. Caller must ensure no None images.
+
+        If images are already torch.Tensors (pre-processed by DataLoader workers),
+        they are stacked and sent to device directly, skipping the processor.
+        This allows preprocessing to be parallelized in DataLoader workers.
+        """
         if not isinstance(images, list):
             return self.image_embeddings([images], normalize_embeddings)
         if not images:
             return torch.empty(0)
-        inputs = self.preprocess(images=images, return_tensors="pt")
-        pixel_values = inputs["pixel_values"].to(self.device)
+
+        # Fast path: tensors already preprocessed in DataLoader workers
+        if isinstance(images[0], torch.Tensor):
+            pixel_values = torch.stack(images).to(self.device)
+        else:
+            # Slow path: preprocess on single CPU core here (avoid if possible)
+            inputs = self.preprocess(images=images, return_tensors="pt")
+            pixel_values = inputs["pixel_values"].to(self.device)
+
         with torch.no_grad():
             embeddings = self._encode_image(pixel_values)
         if normalize_embeddings:
@@ -84,7 +96,21 @@ class HuggingFaceGenerator(FeatureGenerator):
 
     def similarities(self, *_):
         raise NotImplementedError("Use image_embeddings / text_embeddings directly.")
-    
+
+    def make_processor_transform(self):
+        """Return a callable that preprocesses a single PIL image into a tensor.
+
+        This is intended to be used as a DataLoader transform so that preprocessing
+        runs in parallel across worker processes rather than serially on the main thread.
+        """
+        processor = self.preprocess
+
+        def _transform(img):
+            # processor expects a list; squeeze out the batch dim
+            return processor(images=[img], return_tensors="pt")["pixel_values"].squeeze(0)
+
+        return _transform
+
 class SiliconMenagerieGenerator(FeatureGenerator):
     supports_text: bool = False
     class _TorchvisionProcessor:
@@ -110,7 +136,7 @@ class SiliconMenagerieGenerator(FeatureGenerator):
         ])
         processor = self._TorchvisionProcessor(transform)
         super().__init__(model, processor, dataloader, device, name=model_name)
-    
+
     @property
     def embedding_dim(self) -> int:
         return self.model.embed_dim
@@ -118,13 +144,29 @@ class SiliconMenagerieGenerator(FeatureGenerator):
     def image_embeddings(self, images, normalize_embeddings=False):
         if not isinstance(images, list):
             images = [images]
-        inputs = self.preprocess(images=images)
-        pixel_values = inputs["pixel_values"].to(self.device)
+
+        # Fast path: tensors already preprocessed in DataLoader workers
+        if isinstance(images[0], torch.Tensor):
+            pixel_values = torch.stack(images).to(self.device)
+        else:
+            inputs = self.preprocess(images=images)
+            pixel_values = inputs["pixel_values"].to(self.device)
+
         with torch.no_grad():
             embeddings = self.model(pixel_values)
         if normalize_embeddings:
             embeddings = utils.normalize_embeddings(embeddings)
         return embeddings
+
+    def make_processor_transform(self):
+        """Return the underlying torchvision transform for use in DataLoader workers."""
+        # self.preprocess is a _TorchvisionProcessor wrapping a Compose pipeline
+        inner_transform = self.preprocess.transform
+
+        def _transform(img):
+            return inner_transform(img)
+
+        return _transform
 
     def similarities(self, stimulus1, stimulus2, dataloader_row):
         raise NotImplementedError("Silicon Menagerie models are vision-only; use image_embeddings directly.")
