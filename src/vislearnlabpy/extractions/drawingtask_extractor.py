@@ -355,7 +355,7 @@ class DrawingTaskExtractor(MongoExtractor):
         age_part, participant_part = self._age_participant_parts(age, participant_id, session_id)
         return f"{category}_{extraction_type}_{age_part}{participant_part}{session_id}"
 
-    def extract_images(self, image_dir=None, imsize=224, transform_file=False, highres=False, stroke_settings=StrokeSettings(), transform_settings=None, **filters):
+    def extract_images(self, image_dir=None, imsize=224, transform_file=False, highres=False, stroke_settings=StrokeSettings(), transform_settings=None, save_type="png", **filters):
         if image_dir is None:
             image_dir = os.path.join(self.output_dir, 'sketches_full_dataset')
         # Initialize tracking variables
@@ -447,11 +447,12 @@ class DrawingTaskExtractor(MongoExtractor):
                             svg_list = make_svg_list(stroke_recs)
                             # Get verts and codes
                             Verts, Codes = get_verts_and_codes(svg_list)
-                            # Render and save as PNGs
+                            # Render and save, defualt save as PNGs
                             render_and_save(Verts,
                                         Codes,
                                         save_dir=category_dir,
                                         base_filename=base_filename,
+                                        save_type=save_type,
                                         stroke_settings=stroke_settings,
                                         last_stroke_only=True)
                             if transform_file:

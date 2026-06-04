@@ -67,7 +67,8 @@ def render_and_save(Verts,
                     stroke_settings: StrokeSettings = StrokeSettings(),
                     save_dir=os.getcwd(),
                     base_filename='strokes',
-                    last_stroke_only=False):
+                    last_stroke_only=False,
+                    save_type='png'):
     '''
     input:
         line_width: how wide of strokes do we want? (int)
@@ -124,10 +125,10 @@ def render_and_save(Verts,
         os.makedirs(save_dir, exist_ok=True)
         if not last_stroke_only:
             # saving stroke count and not index so i+1
-            fname = f'{base_filename}_{i+1}.png'
+            fname = f'{base_filename}_{i+1}.{save_type}'
         else:
             # not including stroke count in the name since we're only saving the final stroke
-            fname = f'{base_filename}.png'
+            fname = f'{base_filename}.{save_type}'
             
         filepath = os.path.join(save_dir, fname)
         fig.savefig(filepath, bbox_inches='tight', pad_inches=0.0)
