@@ -94,14 +94,7 @@ class MultimodalModel(FeatureGenerator):
     def make_processor_transform(self):
         """Return the CLIP preprocess transform for use in DataLoader workers."""
         preprocess = self.preprocess  # torchvision Compose pipeline
-
-        def _transform(img):
-            if isinstance(img, torch.Tensor):
-                from torchvision import transforms as T
-                img = T.ToPILImage()(img)
-            return preprocess(img)  # returns a tensor directly unlike HF processor
-
-        return _transform
+        
     def similarities(self, word1, word2, images):
         valid_images = [img for img in images if img is not None]
         similarity_scores = []

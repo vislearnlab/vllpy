@@ -24,6 +24,21 @@ MODEL_PRESETS = {
 for model_name in silicon_menagerie_utils.get_available_models():
     MODEL_PRESETS[model_name] = {"model_source": "silicon_menagerie", "model_name": model_name, "model_type": model_name}
 
+class HuggingFaceTransform:
+    def __init__(self, model_name: str, processor_cls):
+        self.model_name = model_name
+        self.processor_cls = processor_cls
+        self._processor = None
+
+    @property
+    def processor(self):
+        if self._processor is None:
+            self._processor = self.processor_cls.from_pretrained(self.model_name)
+        return self._processor
+
+    def __call__(self, img):
+        return self.processor(images=[img], return_tensors="pt")["pixel_values"].squeeze(0)
+        
 class HuggingFaceGenerator(FeatureGenerator):
     """Base class for all HuggingFace-backed generators.
 
@@ -103,13 +118,7 @@ class HuggingFaceGenerator(FeatureGenerator):
         This is intended to be used as a DataLoader transform so that preprocessing
         runs in parallel across worker processes rather than serially on the main thread.
         """
-        processor = self.preprocess
-
-        def _transform(img):
-            # processor expects a list; squeeze out the batch dim
-            return processor(images=[img], return_tensors="pt")["pixel_values"].squeeze(0)
-
-        return _transform
+        return HuggingFaceTransform(self.model_name, self.preprocess.__class__)
 
 class SiliconMenagerieGenerator(FeatureGenerator):
     supports_text: bool = False
@@ -195,7 +204,8 @@ class HuggingFaceCLIPGenerator(HuggingFaceGenerator):
                          device=device, token=token)
 
     def _encode_image(self, pixel_values):
-        return self.model.get_image_features(pixel_values=pixel_values)
+        image_features = self.model.get_image_features(pixel_values=pixel_values)
+        return image_features.pooler_output if hasattr(image_features, "pooler_output") else image_features.last_hidden_state[:, 0, :]
 
     def text_embeddings(self, words, normalize_embeddings=False):
         prompted = [f"{self.text_prompt}{w}" for w in words]
@@ -203,7 +213,8 @@ class HuggingFaceCLIPGenerator(HuggingFaceGenerator):
                                  padding=True, truncation=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.no_grad():
-            embeddings = self.model.get_text_features(**inputs)
+            text_features = self.model.get_text_features(**inputs)
+            embeddings = text_features.pooler_output if hasattr(text_features, "pooler_output") else text_features.last_hidden_state[:, 0, :]
         if normalize_embeddings:
             embeddings = utils.normalize_embeddings(embeddings)
         return embeddings

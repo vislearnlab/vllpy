@@ -238,7 +238,7 @@ def _image_save_path(save_path, model_type):
     base = os.path.join(os.getcwd(), "output") if save_path is None else str(save_path)
     full = os.path.join(base, f"{model_type}_image_embeddings")
     os.makedirs(full, exist_ok=True)
-    return full
+    return str(Path(full).resolve())
 
 
 def _get_existing_npy_ids(full_save_path):
