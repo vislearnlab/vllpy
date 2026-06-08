@@ -201,6 +201,74 @@ def text_image_sims_from_stores(
     full_df = image_df.merge(text_df, how='left', on=['text1', 'text2'])
     full_df.to_csv(output_csv, index=False)
 
+def load_npy_embeddings(csv_path: str) -> dict:
+    """Load npy embeddings from the index CSV produced by ``output_type='npy'``.
+
+    The CSV has ``text`` and ``embedding_path`` columns.  When a word has
+    multiple image exemplars, their embeddings are averaged.
+
+    Returns
+    -------
+    dict
+        ``{text: ndarray}`` mapping, one mean embedding per unique text label.
+    """
+    df = pd.read_csv(csv_path)
+    groups: dict = {}
+    for _, row in df.iterrows():
+        text = row.get("text")
+        path = row.get("embedding_path")
+        if not isinstance(text, str) or not isinstance(path, str):
+            continue
+        try:
+            emb = np.load(path)
+            groups.setdefault(text, []).append(emb)
+        except Exception as e:
+            print(f"Failed to load {path}: {e}")
+    return {text: np.mean(embs, axis=0) for text, embs in groups.items()}
+
+def combine_sim_dfs(
+    model_dfs: dict,
+    output_csv: Optional[str] = None,
+    key_cols: tuple = ('text1', 'text2'),
+) -> pd.DataFrame:
+    """Merge per-model similarity DataFrames into one wide CSV.
+
+    Each entry in *model_dfs* is ``{model_name: df}`` where *df* may contain
+    multiple similarity columns (e.g. ``image_similarity``, ``text_similarity``,
+    ``multimodal_similarity``).  Every similarity column is prefixed with the
+    model name so columns from different models never collide.
+
+    Parameters
+    ----------
+    model_dfs : dict
+        ``{model_name: pd.DataFrame}`` mapping.  Each DataFrame must contain
+        the columns in *key_cols* plus one or more ``*_similarity`` columns.
+    output_csv : str, optional
+        If given, write the merged result here.
+    key_cols : tuple
+        Columns to join on (default: ``('text1', 'text2')``).
+
+    Returns
+    -------
+    pd.DataFrame
+        Wide DataFrame with one row per unique key and one column per
+        (model, similarity_type) combination.
+    """
+    merged = None
+    for model_name, df in model_dfs.items():
+        sim_cols = [c for c in df.columns if 'similarity' in c]
+        rename = {c: f"{model_name}_{c}" for c in sim_cols}
+        df = df.rename(columns=rename)
+        keep = list(key_cols) + list(rename.values())
+        if merged is None:
+            merged = df[keep]
+        else:
+            merged = merged.merge(df[keep], on=list(key_cols), how='outer')
+    if merged is not None and output_csv is not None:
+        os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
+        merged.to_csv(output_csv, index=False)
+    return merged
+
 def calculate_probability(drawing_embedding, text_embeddings_list, target_category, logit=100):
     """Calculate probability of right detection using softmax of cosine similarities"""
     similarities = []

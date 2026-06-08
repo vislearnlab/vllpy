@@ -158,11 +158,11 @@ class EmbeddingStore():
                     "normed_embedding": Optional[AnyTensor],
                 }
             })
-            raw_list = DocList[FlexDoc]().pull(doc_input_path, show_progress=False)
+            raw_list = DocList[FlexDoc]().pull(doc_input_path, show_progress=False, local_cache=False)
             dim = int(raw_list[0].embedding.shape[-1]) if len(raw_list) > 0 else 512
 
         EmbType = _image_embedding_type(dim)
-        typed_list = DocList[EmbType]().pull(doc_input_path, show_progress=True)
+        typed_list = DocList[EmbType]().pull(doc_input_path, show_progress=True, local_cache=False)
         return EmbeddingStore(typed_list, feature_generator, EmbeddingType=EmbType, dim=dim)
 
     # TODO: add binary save

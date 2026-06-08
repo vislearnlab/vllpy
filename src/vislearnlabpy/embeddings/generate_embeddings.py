@@ -1,10 +1,9 @@
 from dataclasses import dataclass, replace as dataclass_replace
-import math
 import time
 from typing import Any, Iterable, Optional
 from vislearnlabpy.models.clip_model import CLIPGenerator
 from vislearnlabpy.models.hf_model import HuggingFaceVisionGenerator, HuggingFaceCLIPGenerator, MODEL_PRESETS, SiliconMenagerieGenerator
-from vislearnlabpy.embeddings.stimuli_loader import StimuliLoader, StimuliDataset
+from vislearnlabpy.embeddings.stimuli_loader import StimuliLoader
 from vislearnlabpy.embeddings.utils import save_df, indexed_embeddings, is_url
 from vislearnlabpy.embeddings.embedding_store import EmbeddingStore
 import torch
@@ -45,6 +44,8 @@ class EmbeddingConfig:
     text_prompt: str = "a photo of a "    # prepended to every text label (CLIP only)
     normalize_embeddings: bool = False
     transform: Optional[Any] = None       # torchvision transform pipeline
+    layer: Optional[int] = None           # extract embeddings from this hidden-state index (HF vision models only)
+    mean_pool: bool = False               # mean-pool over all tokens instead of using CLS token (HF models only)
     num_actors: Optional[int] = None      # for parallel npy generation (Ray)
     gpu_per_actor: float = 0.4            # for parallel npy generation (Ray)
     save_every_batch: bool = False        # save after every batch instead of all at end
@@ -78,12 +79,14 @@ try:
             if config.model_source == "huggingface":
                 logger.debug("HuggingFaceVisionGenerator")
                 self.model = HuggingFaceVisionGenerator(
-                    model_name=config.model_name, device=self.device, token=config.hf_token
+                    model_name=config.model_name, layer=config.layer,
+                    mean_pool=config.mean_pool, device=self.device, token=config.hf_token
                 )
             elif config.model_source == "huggingface_clip":
                 logger.debug("HuggingFaceCLIPGenerator")
                 self.model = HuggingFaceCLIPGenerator(
-                    model_name=config.model_name, text_prompt=config.text_prompt,
+                    model_name=config.model_name, layer=config.layer,
+                    mean_pool=config.mean_pool, text_prompt=config.text_prompt,
                     device=self.device, token=config.hf_token
                 )
             elif config.model_source == "silicon_menagerie":
@@ -266,20 +269,34 @@ class EmbeddingGenerator:
 
     @classmethod
     def from_model(cls, name: str, **config_kwargs) -> "EmbeddingGenerator":
-        """Instantiate from a named preset, e.g. EmbeddingGenerator.from_model('dinov3-babyview').
+        """Instantiate from a named preset, e.g. EmbeddingGenerator.from_model('clip-hf', layer=5).
 
-        Any extra keyword arguments override the preset's EmbeddingConfig fields.
+        Preset values are used as defaults; any keyword argument overrides them.
+        When ``layer`` is specified and ``model_type`` is not explicitly overridden,
+        ``model_type`` is auto-suffixed with ``_layer{N}`` so embedding stores for
+        different layers don't share the same output directory.
+
+        Presets may also include a ``layer`` key directly, e.g.:
+            MODEL_PRESETS["clip-hf-layer5"] = {**MODEL_PRESETS["clip-hf"], "layer": 5}
+
         Available presets: """ + ", ".join(f'"{k}"' for k in MODEL_PRESETS) + """
         """
         if name not in MODEL_PRESETS:
             raise ValueError(f"Unknown model preset '{name}'. Available: {list(MODEL_PRESETS)}")
-        cfg = EmbeddingConfig(**{**MODEL_PRESETS[name], **config_kwargs})
+        merged = {**MODEL_PRESETS[name], **config_kwargs}
+        if merged.get("layer") is not None and "model_type" not in config_kwargs:
+            merged["model_type"] = f"{merged['model_type']}_layer{merged['layer']}"
+        # Strip preset-only metadata keys that are not EmbeddingConfig fields
+        cfg_fields = {f for f in EmbeddingConfig.__dataclass_fields__}
+        cfg = EmbeddingConfig(**{k: v for k, v in merged.items() if k in cfg_fields})
         return cls(config=cfg)
 
     def _build_model(self, dataloader=None):
         if self.config.model_source == "huggingface":
             return HuggingFaceVisionGenerator(
                 model_name=self.config.model_name,
+                layer=self.config.layer,
+                mean_pool=self.config.mean_pool,
                 dataloader=dataloader,
                 device=self.device,
                 token=self.config.hf_token,
@@ -287,6 +304,8 @@ class EmbeddingGenerator:
         elif self.config.model_source == "huggingface_clip":
             return HuggingFaceCLIPGenerator(
                 model_name=self.config.model_name,
+                layer=self.config.layer,
+                mean_pool=self.config.mean_pool,
                 text_prompt=self.config.text_prompt,
                 dataloader=dataloader,
                 device=self.device,
@@ -347,7 +366,8 @@ class EmbeddingGenerator:
 
     def generate_text_embeddings(self, texts: Iterable[str], output_path=None, overwrite=False):
         """Generate and save text embeddings for an explicit list of texts."""
-        store = EmbeddingStore(FeatureGenerator=self.model)
+        text_dim = getattr(self.model, "text_embedding_dim", self.model.embedding_dim)
+        store = EmbeddingStore(FeatureGenerator=self.model, dim=text_dim)
         filepath, full_save_path = self._create_files(type="text", save_path=output_path)
         existing = self._get_existing_row_ids(filepath, full_save_path)
         row_data = []

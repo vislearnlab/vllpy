@@ -30,8 +30,18 @@ class SimilarityGenerator():
             similarities_df.to_csv(output_csv, index=False)
         return similarities_df
     
-    def all_sims(self, embeddings, texts, output_csv=None):
-        embeddings = np.stack(embeddings)
+    def all_sims(self, embeddings, texts=None, output_csv=None):
+        """All-pairs similarity.
+
+        ``embeddings`` may be:
+        - a ``{text: ndarray}`` dict  (``texts`` is ignored)
+        - a list/array of ndarrays   (``texts`` must be provided)
+        """
+        if isinstance(embeddings, dict):
+            texts = list(embeddings.keys())
+            embeddings = np.stack(list(embeddings.values()))
+        else:
+            embeddings = np.stack(embeddings)
         sim_matrix = self.sim_matrix_fn(embeddings)
         similarities = [
             {
@@ -41,7 +51,7 @@ class SimilarityGenerator():
             }
             for i, j in combinations(range(len(texts)), 2)
         ]
-        return(self._save_csv(similarities, output_csv))
+        return self._save_csv(similarities, output_csv)
     
     def _sim_key(embedding_store_df):
         if "url" in embedding_store_df and pd.notna(embedding_store_df["url"].iloc[0]):
@@ -74,24 +84,35 @@ class SimilarityGenerator():
         return self._save_csv(sims, output_csv)
         
     def specific_sims(self, embeddings, text_pairs: List[Tuple[str, str]], output_csv=None):
-        df = embeddings.to_dataframe()
-        # Process all combinations of embeddings and texts
+        """Compute similarity for specific (text1, text2) pairs.
+
+        ``embeddings`` may be:
+        - a ``{text: ndarray}`` dict
+        - a DocArray EmbeddingList (first embedding per unique text is used)
+        """
+        if isinstance(embeddings, dict):
+            embeddings_dict = embeddings
+        else:
+            df = embeddings.to_dataframe()
+            embeddings_dict = {
+                row["text"]: row["embedding"]
+                for _, row in df.iterrows()
+                if row.get("text") is not None
+            }
         similarities = []
-        existing_texts = df["text"].values
         for (text1, text2) in text_pairs:
-            if text1 in existing_texts and text2 in existing_texts:
-                # Get text embeddings if available
-                text1_embedding = df[df["text"] == text1]["embedding"].iloc[0]
-                text2_embedding = df[df["text"] == text2]["embedding"].iloc[0]
-                entry = {}
+            if text1 in embeddings_dict and text2 in embeddings_dict:
+                emb1, emb2 = embeddings_dict[text1], embeddings_dict[text2]
                 if self.similarity_type == "cosine":
-                    entry[f"{self.similarity_type}_similarity"] = cosine_sim(text1_embedding, text2_embedding)
-                    entry["text1"] = text1
-                    entry["text2"] = text2
-                similarities.append(entry)
+                    sim = cosine_sim(emb1, emb2)
+                else:
+                    sim = float(self.sim_matrix_fn(np.stack([emb1, emb2]))[0, 1])
+                similarities.append({
+                    f"{self.similarity_type}_similarity": sim,
+                    "text1": text1,
+                    "text2": text2,
+                })
             else:
-                print(
-                    f"Skipping missing pair of {text1} and {text2}")
-        # Save to CSV
-        return(self._save_csv(similarities, output_csv))
+                print(f"Skipping missing pair of {text1} and {text2}")
+        return self._save_csv(similarities, output_csv)
     

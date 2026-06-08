@@ -1,4 +1,3 @@
-import itertools
 from vislearnlabpy.models.feature_generator import FeatureGenerator
 from vislearnlabpy.embeddings import utils
 from torchvision import transforms
@@ -93,44 +92,5 @@ class MultimodalModel(FeatureGenerator):
     
     def make_processor_transform(self):
         """Return the CLIP preprocess transform for use in DataLoader workers."""
-        preprocess = self.preprocess  # torchvision Compose pipeline
-        
-    def similarities(self, word1, word2, images):
-        valid_images = [img for img in images if img is not None]
-        similarity_scores = []
-        # TODO: this only returns the similarity scores for the first pair of images: need to separate out, indexing is weird
-        for image1, image2 in itertools.combinations(valid_images, 2):
-            curr_image_embeddings = self.image_embeddings([image1, image2])
-            curr_text_embeddings = self.text_embeddings([word1, word2])
-            # TODO: need to fix how each row is labeled in lookit_similarities, 
-            similarity_scores.append({
-                'image_similarity': self.similarity(curr_image_embeddings[0], curr_image_embeddings[1]),
-                'text_similarity': self.similarity(curr_text_embeddings[0], curr_text_embeddings[1]),
-                # finding distractor image to target word similarity
-                'multimodal_similarity': self.text_to_images_similarity(curr_image_embeddings, curr_text_embeddings[0]),
-            })
-        if similarity_scores == []:
-            print(f"skipping {word1} and {word2} since they do not have valid images")
-            return [{
-                'image_similarity': None,
-                'text_similarity': None,
-                'multimodal_similarity': None
-            }]
-        else:
-            return similarity_scores
-        
-    # TODO: probably move this to the dataloader row level instead of to a pair of words within a dataloader row
-    # TODO: words or texts? what is my parameter
-    def embeddings(self, word1, word2, dataloader_row):
-        valid_images = [img for img in dataloader_row['images'] if img is not None]
-        output_embeddings = []
-        for image1, image2 in itertools.combinations(valid_images, 2):
-            curr_image_embeddings = self.image_embeddings([image1, image2])
-            curr_text_embeddings = self.text_embeddings([word1, word2])
-            output_embeddings.append({
-                'image_embeddings': curr_image_embeddings,
-                'text_embeddings': curr_text_embeddings,
-                'multimodal_embeddings': self.multimodal_embeddings(curr_image_embeddings, curr_text_embeddings)
-            })
-        return output_embeddings
-    
+        return self.preprocess
+

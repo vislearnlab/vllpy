@@ -6,19 +6,19 @@ from vislearnlabpy.models import silicon_menagerie_utils
 
 # Named presets — pass the key to EmbeddingGenerator.from_model()
 MODEL_PRESETS = {
-    # Vision-language via openai/clip package
-    "clip":              {"model_source": "openai_clip",     "model_name": "ViT-B/32",                                "model_type": "clip"},
-    "clip-large":        {"model_source": "openai_clip",     "model_name": "ViT-L/14",                                "model_type": "clip-large"},
-    # Vision-language via HuggingFace CLIP
-    "clip-hf":           {"model_source": "huggingface_clip","model_name": "openai/clip-vit-base-patch32",             "model_type": "clip"},
-    "clip-hf-large":     {"model_source": "huggingface_clip","model_name": "openai/clip-vit-large-patch14",            "model_type": "clip-large"},
+    # Vision-language via openai/clip package (no layer support)
+    "clip":          {"model_source": "openai_clip",      "model_name": "ViT-B/32",                                 "model_type": "clip"},
+    "clip-large":    {"model_source": "openai_clip",      "model_name": "ViT-L/14",                                 "model_type": "clip-large"},
+    # Vision-language via HuggingFace CLIP — num_layers = num_hidden_layers + 1 (embedding layer)
+    "clip-hf":       {"model_source": "huggingface_clip", "model_name": "openai/clip-vit-base-patch32",             "model_type": "clip",       "num_layers": 13},
+    "clip-hf-large": {"model_source": "huggingface_clip", "model_name": "openai/clip-vit-large-patch14",            "model_type": "clip-large", "num_layers": 25},
     # Vision-only HuggingFace models
-    "dinov3-base":            {"model_source": "huggingface",     "model_name": "facebook/dinov3-vitb16-pretrain-lvd1689m", "model_type": "dinov3-vitb16"},
-    "dinov3":      {"model_source": "huggingface",     "model_name": "facebook/dinov3-vitl16-pretrain-lvd1689m", "model_type": "dinov3-vitl16"},
-    "dinov3-babyview":   {"model_source": "huggingface",     "model_name": "awwkl/dinov3-vitl-babyview",              "model_type": "dinov3-bv"},
-    "dinov3-small":      {"model_source": "huggingface",     "model_name": "facebook/dinov3-vits16-pretrain-lvd1689m", "model_type": "dinov3-vits16"},
-    "dinov2": {"model_source": "huggingface", "model_name": "facebook/dinov2-large", "model_type": "dinov2-l"},
-    "dinov2-base": {"model_source": "huggingface",   "model_name": "facebook/dinov2-base", "model_type": "dinov2-b"}
+    "dinov3-base":   {"model_source": "huggingface",      "model_name": "facebook/dinov3-vitb16-pretrain-lvd1689m", "model_type": "dinov3-vitb16",  "num_layers": 13},
+    "dinov3":        {"model_source": "huggingface",      "model_name": "facebook/dinov3-vitl16-pretrain-lvd1689m", "model_type": "dinov3-vitl16",  "num_layers": 25},
+    "dinov3-babyview":{"model_source": "huggingface",     "model_name": "awwkl/dinov3-vitl-babyview",               "model_type": "dinov3-bv",      "num_layers": 25},
+    "dinov3-small":  {"model_source": "huggingface",      "model_name": "facebook/dinov3-vits16-pretrain-lvd1689m", "model_type": "dinov3-vits16",  "num_layers": 13},
+    "dinov2":        {"model_source": "huggingface",      "model_name": "facebook/dinov2-large",                   "model_type": "dinov2-l",       "num_layers": 25},
+    "dinov2-base":   {"model_source": "huggingface",      "model_name": "facebook/dinov2-base",                    "model_type": "dinov2-b",       "num_layers": 13},
 }
 
 for model_name in silicon_menagerie_utils.get_available_models():
@@ -109,9 +109,6 @@ class HuggingFaceGenerator(FeatureGenerator):
             f"{self.model_name} is vision-only and does not support text embeddings."
         )
 
-    def similarities(self, *_):
-        raise NotImplementedError("Use image_embeddings / text_embeddings directly.")
-
     def make_processor_transform(self):
         """Return a callable that preprocesses a single PIL image into a tensor.
 
@@ -169,41 +166,73 @@ class SiliconMenagerieGenerator(FeatureGenerator):
 
     def make_processor_transform(self):
         """Return the underlying torchvision transform for use in DataLoader workers."""
-        # self.preprocess is a _TorchvisionProcessor wrapping a Compose pipeline
         inner_transform = self.preprocess.transform
-
-        def _transform(img):
-            return inner_transform(img)
-
-        return _transform
-
-    def similarities(self, stimulus1, stimulus2, dataloader_row):
-        raise NotImplementedError("Silicon Menagerie models are vision-only; use image_embeddings directly.")
+        return lambda img: inner_transform(img)
 
 
 class HuggingFaceVisionGenerator(HuggingFaceGenerator):
     supports_text: bool = False
-    """Vision-only generator (DINOv2, DINOv3, …). Extracts the CLS token."""
+    """Vision-only generator (DINOv2, DINOv3, …). Extracts the CLS token.
 
-    def __init__(self, model_name, dataloader=None, device=None, token=None):
+    Args:
+        layer: If given, extract the CLS token from this hidden-state index instead
+               of the final pooler output. 0 = patch-embedding output, 1 = first
+               transformer block, -1 = last transformer block, etc.
+    """
+
+    def __init__(self, model_name, layer=None, mean_pool=False, dataloader=None, device=None, token=None):
         super().__init__(model_name, AutoModel, AutoImageProcessor,
                          dataloader=dataloader, device=device, token=token)
+        self.layer = layer
+        self.mean_pool = mean_pool
+        if layer is not None:
+            self.name = f"{self.name}_layer{layer}"
+
+    @property
+    def embedding_dim(self) -> int:
+        if self.layer is not None or self.mean_pool:
+            return int(self.model.config.hidden_size)
+        return super().embedding_dim
 
     def _encode_image(self, pixel_values):
-        outputs = self.model(pixel_values=pixel_values)
+        outputs = self.model(pixel_values=pixel_values, output_hidden_states=self.layer is not None)
+        if self.layer is not None:
+            return outputs.hidden_states[self.layer].mean(dim=1)
+        if self.mean_pool:
+            return outputs.last_hidden_state.mean(dim=1)
         return outputs.pooler_output if hasattr(outputs, "pooler_output") else outputs.last_hidden_state[:, 0, :]
 
 class HuggingFaceCLIPGenerator(HuggingFaceGenerator):
     """Vision-language generator for HuggingFace CLIP models."""
     supports_text: bool = True
 
-    def __init__(self, model_name, text_prompt="a photo of a ",
+    def __init__(self, model_name, layer=None, mean_pool=False, text_prompt="a photo of a ",
                  dataloader=None, device=None, token=None):
         super().__init__(model_name, CLIPModel, CLIPProcessor,
                          text_prompt=text_prompt, dataloader=dataloader,
                          device=device, token=token)
+        self.layer = layer
+        self.mean_pool = mean_pool
+        if layer is not None:
+            self.name = f"{self.name}_layer{layer}"
+
+    @property
+    def embedding_dim(self) -> int:
+        if self.layer is not None or self.mean_pool:
+            return int(self.model.config.vision_config.hidden_size)
+        return super().embedding_dim
+
+    @property
+    def text_embedding_dim(self) -> int:
+        if self.layer is not None or self.mean_pool:
+            return int(self.model.config.text_config.hidden_size)
+        return int(self.model.config.projection_dim)
 
     def _encode_image(self, pixel_values):
+        if self.layer is not None or self.mean_pool:
+            vision_out = self.model.vision_model(pixel_values=pixel_values, output_hidden_states=self.layer is not None)
+            hidden = vision_out.hidden_states[self.layer] if self.layer is not None else vision_out.last_hidden_state
+            return hidden.mean(dim=1)
         image_features = self.model.get_image_features(pixel_values=pixel_values)
         return image_features.pooler_output if hasattr(image_features, "pooler_output") else image_features.last_hidden_state[:, 0, :]
 
@@ -213,8 +242,12 @@ class HuggingFaceCLIPGenerator(HuggingFaceGenerator):
                                  padding=True, truncation=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.no_grad():
-            text_features = self.model.get_text_features(**inputs)
-            embeddings = text_features.pooler_output if hasattr(text_features, "pooler_output") else text_features.last_hidden_state[:, 0, :]
+            if self.layer is not None or self.mean_pool:
+                text_out = self.model.text_model(**inputs, output_hidden_states=self.layer is not None)
+                hidden = text_out.hidden_states[self.layer] if self.layer is not None else text_out.last_hidden_state
+                embeddings = hidden.mean(dim=1)
+            else:
+                embeddings = self.model.get_text_features(**inputs)
         if normalize_embeddings:
             embeddings = utils.normalize_embeddings(embeddings)
         return embeddings
