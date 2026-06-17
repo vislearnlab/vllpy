@@ -226,7 +226,7 @@ class DrawingTaskExtractor(MongoExtractor):
 
     def _get_stroke_records(self, session_id, trial_num):
         """Get stroke records for a given session and trial"""
-        timing_field = self._get_timing_field('start')
+        timing_field = self._get_stroke_timing_field('start')
         return list(self.collection.find({'$and': [
             {'sessionId': session_id}, 
             {'dataType': 'stroke'},
