@@ -83,21 +83,27 @@ class SimilarityGenerator():
         ]
         return self._save_csv(sims, output_csv)
         
-    def specific_sims(self, embeddings, text_pairs: List[Tuple[str, str]], output_csv=None):
-        """Compute similarity for specific (text1, text2) pairs.
+    def specific_sims(self, embeddings, text_pairs: List[Tuple[str, str]], output_csv=None,
+                      use_urls=False):
+        """Compute similarity for specific pairs.
 
         ``embeddings`` may be:
-        - a ``{text: ndarray}`` dict
-        - a DocArray EmbeddingList (first embedding per unique text is used)
+        - a ``{key: ndarray}`` dict (keyed by text or URL)
+        - a DocArray EmbeddingList (keyed by text by default, or URL if use_urls=True)
+
+        use_urls : bool
+            If True, look up embeddings by URL instead of text label. Pairs should
+            then be (url1, url2) tuples.
         """
         if isinstance(embeddings, dict):
             embeddings_dict = embeddings
         else:
             df = embeddings.to_dataframe()
+            key_col = "url" if use_urls else "text"
             embeddings_dict = {
-                row["text"]: row["embedding"]
+                row[key_col]: row["embedding"]
                 for _, row in df.iterrows()
-                if row.get("text") is not None
+                if row.get(key_col) is not None
             }
         similarities = []
         for (text1, text2) in text_pairs:

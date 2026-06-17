@@ -316,8 +316,10 @@ class StimuliDataset(Dataset):
     def __init__(self, manifest, images_folder=None, id_column=None, transform=None):
         self.manifest = manifest
         self.images_folder = self._resolved_image_path(images_folder)
-        self.num_text_cols = sum(1 for c in self.manifest.columns if re.compile("text[0-9]").match(c))
-        self.num_image_cols = len([c for c in self.manifest.columns if re.compile("image[0-9]").match(c)])
+        self.text_cols = sorted([c for c in self.manifest.columns if re.fullmatch(r"text\d+", c)])
+        self.num_text_cols = len(self.text_cols)
+        self.image_cols = sorted([c for c in self.manifest.columns if re.fullmatch(r"image\d+", c)])
+        self.num_image_cols = len(self.image_cols)
         self.id_column = id_column
         self.transform = transform
 
@@ -333,7 +335,7 @@ class StimuliDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.manifest.iloc[idx]
-        texts = [str(row[f"text{i}"]) for i in range(1, self.num_text_cols + 1)]
+        texts = [str(row[c]) for c in self.text_cols]
         images = []
         image_paths = self._get_image_paths(row)
         full_image_paths = []
@@ -380,12 +382,11 @@ class StimuliDataset(Dataset):
             return [None] * self.num_text_cols
         # If images are not in the manifest
         elif self.num_image_cols == 0:
-            return [os.path.join(self.images_folder, row[f"text{i}"] + ".jpg") for i in range(1, self.num_text_cols + 1)]
+            return [os.path.join(self.images_folder, row[c] + ".jpg") for c in self.text_cols]
         else:
-            # allowing for a secondary image path to be provided with different images in the same stimuli sets stored in different subpaths
             return [
-                os.path.join(*(self.images_folder,) if self.images_folder is not None else (), *(row["image_path"],) if "image_path" in row else (), row[f"image{i}"])
-                for i in range(1, self.num_image_cols + 1)]
+                os.path.join(*(self.images_folder,) if self.images_folder is not None else (), *(row["image_path"],) if "image_path" in row else (), row[c])
+                for c in self.image_cols]
 
 
 class StimuliLoader():

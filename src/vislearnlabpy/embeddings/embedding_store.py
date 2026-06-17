@@ -207,10 +207,10 @@ class EmbeddingStore():
         sim_generator = SimilarityGenerator(similarity_type=sim_type, model=self.FeatureGenerator.model)
         return sim_generator.cross_sims(self.EmbeddingList, embedding_list)
 
-    def retrieve_similarities(self, sim_type="cosine", output_path=None, text_pairs=None):
+    def retrieve_similarities(self, sim_type="cosine", output_path=None, text_pairs=None,
+                              use_urls=False):
         sim_generator = SimilarityGenerator(similarity_type=sim_type, model=self.FeatureGenerator.model)
         if text_pairs is None:
-            # again assuming url as id, followed by text. Wondering now if we do need an explicit id column.
             texts = self.EmbeddingList.text
             urls = self.EmbeddingList.url
             if urls and urls[0] is not None:
@@ -221,33 +221,190 @@ class EmbeddingStore():
                 keys = None
             return sim_generator.all_sims(self.EmbeddingList.embedding, keys, output_path)
         else:
-            return sim_generator.specific_sims(self.EmbeddingList, text_pairs, output_path)
+            return sim_generator.specific_sims(self.EmbeddingList, text_pairs, output_path,
+                                               use_urls=use_urls)
+
+    def _embeddings_by_url(self) -> dict:
+        """Return {url: (embedding, text)} for all URL-keyed embeddings."""
+        return {doc.url: (doc.embedding, doc.text)
+                for doc in self.EmbeddingList if doc.url is not None}
+
+    def _mean_embeddings_by_text(self) -> dict:
+        """Return {text: mean_embedding} for all text-labeled embeddings."""
+        groups = {}
+        for doc in self.EmbeddingList:
+            if doc.text is not None:
+                groups.setdefault(doc.text, []).append(doc.embedding)
+        return {text: np.mean(embs, axis=0) for text, embs in groups.items()}
+
+    def _resolve_pairs(self, pairs, use_urls, text_labels=None):
+        """Yield (embs, text1, ids) for each N-option trial.
+
+        embs: list of N embeddings (one per option)
+        text1: target text label for the text embedding lookup
+        ids: list of N image IDs
+        """
+        if use_urls:
+            img_by_url = self._embeddings_by_url()
+            for i, pair in enumerate(pairs):
+                ids = list(pair)
+                text1 = text_labels[i] if text_labels is not None else img_by_url.get(ids[0], (None, None))[1]
+                if any(id_ not in img_by_url for id_ in ids):
+                    continue
+                yield [img_by_url[id_][0] for id_ in ids], text1, ids
+        else:
+            img_by_text = self._mean_embeddings_by_text()
+            for i, pair in enumerate(pairs):
+                ids = list(pair)
+                text1 = text_labels[i] if text_labels is not None else ids[0]
+                if any(id_ not in img_by_text for id_ in ids):
+                    continue
+                yield [img_by_text[id_] for id_ in ids], text1, ids
+    # TODO: maybe move to similarity_generator or utils
+    def multimodal_prob(self, text_store, pairs, use_urls=False, text_labels=None,
+                        logit=None, beta=1.0, rule="softmax"):
+        """Softmax or Luce probability P(I_target | T_target) for each N-option trial.
+
+        Works for 2-AFC, 4-AFC, or any N-AFC — pairs contains N image IDs per trial.
+
+        Parameters
+        ----------
+        text_store : EmbeddingStore
+            Text embedding store from the same model.
+        pairs : list of tuples
+            Each tuple contains N image IDs (URLs if use_urls=True, else text labels).
+            The first element is the target option.
+        use_urls : bool
+            If True, look up images by URL (no averaging). If False, use mean embedding
+            per text label.
+        text_labels : list of str, optional
+            Target text label per trial for the text embedding lookup. If None:
+            for URL pairs, inferred from the store's text attribute for the first URL;
+            for text pairs, uses the first element of the pair.
+        logit : float, optional
+            Model's learned temperature applied to raw cosine similarities. Defaults to
+            the model's logit_scale (e.g. ~100 for CLIP). Set to 1.0 when passing a
+            KL-optimized beta, since that beta already operates on raw cosine sims.
+            Ignored when rule="luce".
+        beta : float
+            Additional exponent on top of logit: softmax(beta * logit * sims).
+            Pass the optimal beta from softmax_optimized_kl for human-calibrated scaling.
+            For Luce: ((sims + 1) / 2) ** beta. Default 1.0.
+        rule : str
+            "softmax" (default): softmax(beta * logit * sims).
+            "luce": Luce choice rule — sim(I_i, T) / Σ sim(I_j, T). beta and logit are not applied.
+
+        Returns
+        -------
+        pd.DataFrame with columns: id1..idN, text1, multimodal_prob
+        """
+        from scipy.special import softmax as scipy_softmax
+
+        txt_by_text = text_store._mean_embeddings_by_text()
+
+        if logit is None:
+            model = self.FeatureGenerator
+            if hasattr(model, '_resolve_logit_scale'):
+                logit = model._resolve_logit_scale()
+            elif hasattr(model, 'model') and hasattr(model.model, 'logit_scale'):
+                logit = model.model.logit_scale.exp().item()
+            else:
+                logit = 100.0
+
+        rows = []
+        for embs, text1, ids in self._resolve_pairs(pairs, use_urls, text_labels):
+            if text1 not in txt_by_text:
+                continue
+            normed = [e / np.linalg.norm(e) for e in embs]
+            t1 = txt_by_text[text1] / np.linalg.norm(txt_by_text[text1])
+            sims = np.array([t1 @ e for e in normed])
+            if rule == "softmax":
+                probs = scipy_softmax(beta * logit * sims)
+            elif rule == "luce":
+                probs = sims / sims.sum()
+            else:
+                raise ValueError(f"Unknown rule '{rule}'. Use 'softmax' or 'luce'.")
+            row = {f"id{j+1}": id_ for j, id_ in enumerate(ids)}
+            row.update({"text1": text1, "multimodal_prob": probs[0]})
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def softmax_optimized_kl(self, text_store, pairs, human_probs, use_urls=False,
+                             text_labels=None, beta_bounds=(0.025, 40)):
+        """Softmax-optimized KL divergence between human and model response distributions.
+
+        Finds the optimal β* minimizing mean KL(h_t || softmax(β·m_t)) across trials.
+        Works for any N-AFC. Matches the R implementation using philentropy::KL + nloptr.
+
+        For 2-AFC, pass human_probs as scalars p ∈ [0,1] (proportion choosing the
+        target); [p, 1-p] is constructed internally. For N-AFC, pass arrays of length N.
+
+        Parameters
+        ----------
+        text_store : EmbeddingStore
+            Text embedding store from the same model.
+        pairs : list of tuples
+            Same format as multimodal_prob.
+        human_probs : list of float or array-like
+            Per-trial human proportion choosing the target (first) image.
+        use_urls : bool
+            If True, look up images by URL. If False, use mean embedding per text label.
+        text_labels : list of str, optional
+            Same as multimodal_prob.
+        beta_bounds : (float, float)
+            Search range for β (default matches R implementation: 0.025–40).
+
+        Returns
+        -------
+        dict with keys: beta (optimal exponent), mean_kl (at β*), per_trial_kl (list)
+        """
+        from scipy.optimize import minimize_scalar
+        from scipy.special import softmax as scipy_softmax
+
+        txt_by_text = text_store._mean_embeddings_by_text()
+
+        trial_logits, trial_human = [], []
+        for (embs, text1, _), h in zip(self._resolve_pairs(pairs, use_urls, text_labels), human_probs):
+            if text1 not in txt_by_text:
+                continue
+            normed = [e / np.linalg.norm(e) for e in embs]
+            t1 = txt_by_text[text1] / np.linalg.norm(txt_by_text[text1])
+            trial_logits.append(np.array([t1 @ e for e in normed]))
+            h = np.asarray(h, dtype=float)
+            trial_human.append(np.array([h, 1 - h]) if h.ndim == 0 else h)
+
+        def mean_kl(beta):
+            kls = [np.sum(h * np.log(h / np.clip(scipy_softmax(beta * m), 1e-10, 1.0)))
+                   for m, h in zip(trial_logits, trial_human)]
+            return np.mean(kls)
+
+        result = minimize_scalar(mean_kl, bounds=beta_bounds, method='bounded')
+        beta_opt = result.x
+        per_trial_kl = [
+            np.sum(h * np.log(h / np.clip(scipy_softmax(beta_opt * m), 1e-10, 1.0)))
+            for m, h in zip(trial_logits, trial_human)
+        ]
+        return {"beta": beta_opt, "mean_kl": result.fun, "per_trial_kl": per_trial_kl}
 
     def compute_text_rdm(self, sim_type="cosine", output_path=None, order=None, ranked=False):
         from vislearnlabpy.embeddings.similarity_utils import compute_rdm, plot_rdm
         texts = self.EmbeddingList.text
         if texts is None:
             raise ValueError("No text column in embeddings")
-        # Unique texts
+         # Unique texts
         unique_texts = sorted(set(texts))
-        
+
         if order is not None:
-            missing = set(unique_texts) - set(order)
             extra = set(order) - set(unique_texts)
+            missing = set(unique_texts) - set(order)
             if extra:
                 raise ValueError(f"order contains labels not in embeddings: {extra}")
             if missing:
                 print(f"Skipping labels in embeddings not in passed in list: {missing}")
-            unique_texts = list(order) 
-        
-        # Compute mean embedding for each unique text
-        text_means = []
-        for text in unique_texts:
-            embeddings_for_text = [emb.embedding for emb in self.EmbeddingList if emb.text == text]
-            if not embeddings_for_text:
-                continue
-            text_means.append(np.mean(embeddings_for_text, axis=0))
-        text_means = np.stack(text_means)
+            unique_texts = list(order)
+
+        emb_by_text = self._mean_embeddings_by_text()
+        text_means = np.stack([emb_by_text[t] for t in unique_texts if t in emb_by_text])
         # Compute RDM
         rdm = compute_rdm(text_means, method=sim_type, ranked=ranked)
         # Plot RDM if output_path is given
