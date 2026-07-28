@@ -1,7 +1,7 @@
 from dataclasses import dataclass, replace as dataclass_replace
 import time
 from typing import Any, Iterable, Optional
-from vislearnlabpy.models.clip_model import CLIPGenerator
+from vislearnlabpy.models.clip_model import CLIPGenerator, OpenCLIPGenerator
 from vislearnlabpy.models.hf_model import HuggingFaceVisionGenerator, HuggingFaceCLIPGenerator, MODEL_PRESETS, SiliconMenagerieGenerator
 from vislearnlabpy.embeddings.stimuli_loader import StimuliLoader
 from vislearnlabpy.embeddings.utils import save_df, indexed_embeddings, is_url
@@ -34,11 +34,17 @@ class EmbeddingConfig:
       "openai_clip"   - default, uses the openai/CLIP package (ViT-B/32 etc.)
       "huggingface"   - any HuggingFace vision model via AutoModel
                         (DINOv2, DINOv3, HF CLIP, ...); set model_name to the HF repo id.
+      "openclip"      - uses the open_clip package; set model_name to the architecture
+                        (e.g. "ViT-B-32") and pretrained to the checkpoint tag, or
+                        checkpoint_path to a local/downloaded .pt file (takes precedence).
     """
     model_type: str = "clip"               # human-readable label used in output filenames
-    model_source: str = "openai_clip"      # "openai_clip" | "huggingface"
+    model_source: str = "openai_clip"      # "openai_clip" | "huggingface" | "huggingface_clip" | "silicon_menagerie" | "openclip"
     model_name: str = "ViT-B/32"          # variant for openai_clip, or HF repo id
     hf_token: Optional[str] = None        # HuggingFace token for private/gated repos
+    pretrained: Optional[str] = None      # openclip pretrained checkpoint tag (e.g. "laion2b_s34b_b79k")
+    checkpoint_path: Optional[str] = None  # openclip: path to a .pt checkpoint file (overrides pretrained)
+    epoch: Optional[int] = None           # openclip: training epoch, appended to the generator name
     output_type: str = "csv"              # "csv", "npy", or "doc"
     device: Optional[str] = None          # None -> auto-detect CUDA/CPU
     text_prompt: str = "a photo of a "    # prepended to every text label (CLIP only)
@@ -92,6 +98,13 @@ try:
             elif config.model_source == "silicon_menagerie":
                 logger.debug("SiliconMenagerieGenerator")
                 self.model = SiliconMenagerieGenerator(model_name=config.model_name, device=self.device)
+            elif config.model_source == "openclip":
+                logger.debug("OpenCLIPGenerator")
+                self.model = OpenCLIPGenerator(
+                    model_name=config.model_name, pretrained=config.pretrained,
+                    checkpoint_path=config.checkpoint_path, epoch=config.epoch,
+                    text_prompt=config.text_prompt, device=self.device
+                )
             else:
                 logger.debug("CLIPGenerator")
                 self.model = CLIPGenerator(device=self.device, text_prompt=config.text_prompt)
@@ -313,6 +326,16 @@ class EmbeddingGenerator:
             )
         elif self.config.model_source == "silicon_menagerie":
             return SiliconMenagerieGenerator(model_name=self.config.model_name, dataloader=dataloader, device=self.device)
+        elif self.config.model_source == "openclip":
+            return OpenCLIPGenerator(
+                model_name=self.config.model_name,
+                pretrained=self.config.pretrained,
+                checkpoint_path=self.config.checkpoint_path,
+                epoch=self.config.epoch,
+                text_prompt=self.config.text_prompt,
+                dataloader=dataloader,
+                device=self.device,
+            )
         # default: openai_clip
         return CLIPGenerator(
             device=self.device,

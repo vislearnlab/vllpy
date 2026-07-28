@@ -19,6 +19,8 @@ MODEL_PRESETS = {
     "dinov3-small":  {"model_source": "huggingface",      "model_name": "facebook/dinov3-vits16-pretrain-lvd1689m", "model_type": "dinov3-vits16",  "num_layers": 13},
     "dinov2":        {"model_source": "huggingface",      "model_name": "facebook/dinov2-large",                   "model_type": "dinov2-l",       "num_layers": 25},
     "dinov2-base":   {"model_source": "huggingface",      "model_name": "facebook/dinov2-base",                    "model_type": "dinov2-b",       "num_layers": 13},
+    # Vision-language via open_clip package
+    "openclip-b32":  {"model_source": "openclip",         "model_name": "ViT-B-32",     "pretrained": "laion2b_s34b_b79k", "model_type": "openclip-b32"},
 }
 
 for model_name in silicon_menagerie_utils.get_available_models():

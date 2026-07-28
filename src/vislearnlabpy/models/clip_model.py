@@ -35,12 +35,13 @@ class OpenCLIPGenerator(MultimodalModel):
     def __init__(self, model=None, preprocess=None, model_name='ViT-B-32',
                  pretrained='laion2b_s34b_b79k', checkpoint_path=None,
                  text_prompt="a photo of a ", dataloader=None, device=None, epoch=None):
+        # pip install open_clip_torch
         import open_clip
 
         if model is None:
             if checkpoint_path is not None:
                 model, _, preprocess = open_clip.create_model_and_transforms(
-                    model_name, pretrained=checkpoint_path, load_weights_only=False)
+                    model_name, pretrained=checkpoint_path, weights_only=False)
             else:
                 model, _, preprocess = open_clip.create_model_and_transforms(
                     model_name, pretrained=pretrained)
