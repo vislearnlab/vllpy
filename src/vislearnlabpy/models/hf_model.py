@@ -5,6 +5,10 @@ from vislearnlabpy.embeddings import utils
 from vislearnlabpy.models import silicon_menagerie_utils
 
 # Named presets — pass the key to EmbeddingGenerator.from_model()
+# - model_source: which backend class to initiate (see generate_embeddings.py)
+# - model_name: HuggingFace repo ID or OpenAI model variant name
+# - model_type: Shorter human readable name for downstream tasks
+# - num_layers: hidden layers +1
 MODEL_PRESETS = {
     # Vision-language via openai/clip package (no layer support)
     "clip":          {"model_source": "openai_clip",      "model_name": "ViT-B/32",                                 "model_type": "clip"},
