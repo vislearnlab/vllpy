@@ -15,8 +15,8 @@ MODEL_PRESETS = {
     # Vision-only HuggingFace models
     "dinov3-base":   {"model_source": "huggingface",      "model_name": "facebook/dinov3-vitb16-pretrain-lvd1689m", "model_type": "dinov3-vitb16",  "num_layers": 13},
     "dinov3":        {"model_source": "huggingface",      "model_name": "facebook/dinov3-vitl16-pretrain-lvd1689m", "model_type": "dinov3-vitl16",  "num_layers": 25},
-    "dinov3-babyview-2025.1":{"model_source": "huggingface",     "model_name": "awwkl/dinov3-vitl-babyview",               "model_type": "dinov3-bv",      "num_layers": 25},
-    "dinov3-babyview-2026.1":{"model_source": "huggingface",     "model_name": "mcxfrank/babyview-dino-vitl16",               "model_type": "dinov3-bv",      "num_layers": 25},
+    "dinov3-babyview-2025.1":{"model_source": "huggingface",     "model_name": "awwkl/dinov3-vitl-babyview",               "model_type": "dinov3-bv-25",      "num_layers": 25},
+    "dinov3-babyview-2026.1":{"model_source": "huggingface",     "model_name": "mcxfrank/babyview-dino-vitl16",               "model_type": "dinov3-bv-26",      "num_layers": 25},
     "dinov3-small":  {"model_source": "huggingface",      "model_name": "facebook/dinov3-vits16-pretrain-lvd1689m", "model_type": "dinov3-vits16",  "num_layers": 13},
     "dinov2":        {"model_source": "huggingface",      "model_name": "facebook/dinov2-large",                   "model_type": "dinov2-l",       "num_layers": 25},
     "dinov2-base":   {"model_source": "huggingface",      "model_name": "facebook/dinov2-base",                    "model_type": "dinov2-b",       "num_layers": 13},
