@@ -254,7 +254,8 @@ class HuggingFaceCLIPGenerator(HuggingFaceGenerator):
                 hidden = text_out.hidden_states[self.layer] if self.layer is not None else text_out.last_hidden_state
                 embeddings = hidden.mean(dim=1)
             else:
-                embeddings = self.model.get_text_features(**inputs)
+                text_features = self.model.get_text_features(**inputs)
+                embeddings = getattr(text_features, "pooler_output", text_features)
         if normalize_embeddings:
             embeddings = utils.normalize_embeddings(embeddings)
         return embeddings
