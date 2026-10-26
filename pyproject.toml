@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vislearnlabpy"
-version = "0.0.4.6"
+version = "0.0.4.7"
 authors = [
   { name="Tarun Sepuri", email="tarunsepuri@gmail.com" },
+  { name="Alexander Chin", email="achin5804@gmail.com" }
 ]
 dependencies = [
   "pandas>=2.2.3",

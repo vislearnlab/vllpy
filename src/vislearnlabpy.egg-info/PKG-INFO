@@ -1,8 +1,8 @@
 Metadata-Version: 2.4
 Name: vislearnlabpy
-Version: 0.0.4.6
+Version: 0.0.4.7
 Summary: Visual Learning Lab utility files and pipelines
-Author-email: Tarun Sepuri <tarunsepuri@gmail.com>
+Author-email: Tarun Sepuri <tarunsepuri@gmail.com>, Alexander Chin <achin5804@gmail.com>
 License-Expression: MIT
 Project-URL: Homepage, https://github.com/vislearnlab/vllpy
 Project-URL: Issues, https://github.com/vislearnlab/vllpy/issues
